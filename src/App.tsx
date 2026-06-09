@@ -64,6 +64,17 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const preventGameKeyScroll = (event: KeyboardEvent) => {
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(event.code)) {
+        event.preventDefault();
+      }
+    };
+
+    window.addEventListener('keydown', preventGameKeyScroll);
+    return () => window.removeEventListener('keydown', preventGameKeyScroll);
+  }, []);
+
+  useEffect(() => {
     const handleState = (state: GameSnapshot) => setSnapshot(state);
     const handleNotification = (message: string) => setNotification(message);
 
@@ -82,6 +93,8 @@ export default function App() {
 
   return (
     <main className="app-shell">
+      <div ref={gameRootRef} className="world-layer" aria-label="Mundo da fazenda" />
+
       <section className="top-panel" aria-label="Painel principal">
         <div>
           <p className="eyebrow">Capitalism 4 Kids</p>
@@ -104,60 +117,62 @@ export default function App() {
         </div>
       </section>
 
-      <section className="game-layout" aria-label="Jogo e controles">
-        <aside className="side-panel" aria-label="Controles da fazenda">
-          <div className="panel-block">
-            <h2>Ações</h2>
-            <div className="action-grid">
-              {(Object.keys(taskLabels) as TaskType[]).map((task) => (
-                <button key={task} type="button" onClick={() => dispatchTaskKey(task)}>
-                  {taskLabels[task]}
-                </button>
-              ))}
+      <aside className="side-panel left-panel" aria-label="Controles da fazenda">
+        <div className="panel-block">
+          <h2>Ações</h2>
+          <div className="action-grid">
+            {(Object.keys(taskLabels) as TaskType[]).map((task) => (
+              <button key={task} type="button" onClick={() => dispatchTaskKey(task)}>
+                {taskLabels[task]}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="panel-block">
+          <h2>Tarefa atual</h2>
+          <p className="status-line">{formatTask(snapshot.currentTask)}</p>
+        </div>
+
+        <div className="panel-block">
+          <h2>Fila</h2>
+          <p className="status-line">{queuedTasks}</p>
+        </div>
+      </aside>
+
+      <aside className="side-panel right-panel" aria-label="Inventário">
+        <div className="panel-block">
+          <h2>Inventário</h2>
+          <dl className="inventory-list">
+            <div>
+              <dt>Sementes</dt>
+              <dd>{snapshot.inventory.seeds}</dd>
             </div>
-          </div>
+            <div>
+              <dt>Trigo</dt>
+              <dd>{snapshot.inventory.wheat}</dd>
+            </div>
+            <div>
+              <dt>Leite</dt>
+              <dd>{snapshot.inventory.milk}</dd>
+            </div>
+          </dl>
+        </div>
 
-          <div className="panel-block">
-            <h2>Tarefa atual</h2>
-            <p className="status-line">{formatTask(snapshot.currentTask)}</p>
-          </div>
-
-          <div className="panel-block">
-            <h2>Fila</h2>
-            <p className="status-line">{queuedTasks}</p>
-          </div>
-        </aside>
-
-        <section className="game-stage" aria-label="Canvas do jogo">
-          <div ref={gameRootRef} className="game-root" />
-          <p className="notification">{notification}</p>
-        </section>
-
-        <aside className="side-panel" aria-label="Inventário">
-          <div className="panel-block">
-            <h2>Inventário</h2>
-            <dl className="inventory-list">
-              <div>
-                <dt>Sementes</dt>
-                <dd>{snapshot.inventory.seeds}</dd>
+        <div className="panel-block">
+          <h2>Campos</h2>
+          <dl className="field-list">
+            {snapshot.fields.map((field) => (
+              <div key={field.id}>
+                <dt>Campo {field.id}</dt>
+                <dd>{field.state}</dd>
               </div>
-              <div>
-                <dt>Trigo</dt>
-                <dd>{snapshot.inventory.wheat}</dd>
-              </div>
-              <div>
-                <dt>Leite</dt>
-                <dd>{snapshot.inventory.milk}</dd>
-              </div>
-            </dl>
-          </div>
+            ))}
+          </dl>
+        </div>
+      </aside>
 
-          <div className="panel-block">
-            <h2>Campos</h2>
-            <p className="status-line">{snapshot.fields.length} áreas ativas</p>
-          </div>
-        </aside>
-      </section>
+      <p className="notification">{notification}</p>
     </main>
   );
 }
