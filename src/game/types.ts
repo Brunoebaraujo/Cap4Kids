@@ -8,6 +8,8 @@ export type TaskType = 'Prepare Soil' | 'Plant Wheat' | 'Harvest Wheat' | 'Milk 
 
 export type AnimationState = 'idle' | 'walk' | 'prepare soil' | 'plant' | 'harvest' | 'milk cow';
 
+export type CameraMode = 'free' | 'followMaya';
+
 export interface Inventory {
   seeds: number;
   wheat: number;
@@ -32,6 +34,7 @@ export interface GameSnapshot {
   taskQueue: TaskType[];
   fields: FieldSnapshot[];
   animationState: AnimationState;
+  cameraMode: CameraMode;
 }
 
 export interface GameEvents {
