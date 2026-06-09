@@ -459,13 +459,13 @@ export class FarmScene extends Phaser.Scene {
     this.publishState(`${task} destination selected.`);
   }
 
-  private getTaskDestination(task: TaskType) {
+  private getTaskDestination(task: TaskType): Omit<TravelTask, 'task'> {
     if (task === 'Milk Cow') {
-      return { x: tileCenter(LANDMARKS.cowPen.tileX - 3), y: tileCenter(LANDMARKS.cowPen.tileY + 4) };
+      return { targetX: tileCenter(LANDMARKS.cowPen.tileX - 3), targetY: tileCenter(LANDMARKS.cowPen.tileY + 4) };
     }
 
     const field = this.getPreferredFieldForTask(task);
-    return { x: tileCenter(field.tileX), y: tileCenter(field.tileY) };
+    return { targetX: tileCenter(field.tileX), targetY: tileCenter(field.tileY) };
   }
 
   private getPreferredFieldForTask(task: TaskType) {
