@@ -55,7 +55,7 @@ export interface TileDefinition {
 
 const tile = (id: TileId, fileName: string, atlasIndex: number): TileDefinition => ({
   id,
-  textureKey: `tile-${id.replaceAll('_', '-')}`,
+  textureKey: `tile-${id.replace(/_/g, '-')}`,
   assetPath: `assets/tiles/${fileName}.png`,
   atlasIndex,
 });
