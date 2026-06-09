@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createGame } from './game/createGame';
 import { gameEvents } from './game/eventBus';
-import type { GameSnapshot, TaskType } from './game/types';
+import type { CameraMode, GameSnapshot, TaskType } from './game/types';
 
 const taskLabels: Record<TaskType, string> = {
   'Prepare Soil': 'Preparar Solo',
@@ -15,6 +15,11 @@ const taskKeys: Record<TaskType, string> = {
   'Plant Wheat': '2',
   'Harvest Wheat': '3',
   'Milk Cow': '4',
+};
+
+const cameraLabels: Record<CameraMode, string> = {
+  free: 'Livre',
+  followMaya: 'Seguindo Maya',
 };
 
 const initialSnapshot: GameSnapshot = {
@@ -32,6 +37,7 @@ const initialSnapshot: GameSnapshot = {
   taskQueue: [],
   fields: [],
   animationState: 'idle',
+  cameraMode: 'free',
 };
 
 function dispatchTaskKey(task: TaskType) {
@@ -137,6 +143,11 @@ export default function App() {
         <div className="panel-block">
           <h2>Fila</h2>
           <p className="status-line">{queuedTasks}</p>
+        </div>
+
+        <div className="panel-block camera-debug">
+          <h2>Camera</h2>
+          <p className="status-line">{cameraLabels[snapshot.cameraMode]}</p>
         </div>
       </aside>
 
