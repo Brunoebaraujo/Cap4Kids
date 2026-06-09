@@ -56,8 +56,10 @@ export class FarmScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
   private maya!: Phaser.GameObjects.Sprite;
+  private pathLayer!: Phaser.Tilemaps.TilemapLayer;
   private fieldLayer!: Phaser.Tilemaps.TilemapLayer;
   private decorationLayer!: Phaser.Tilemaps.TilemapLayer;
+  private buildingLayer!: Phaser.Tilemaps.TilemapLayer;
   private collisionRects: Phaser.Geom.Rectangle[] = [];
   private mayaX = tileCenter(17);
   private mayaY = tileCenter(19);
@@ -208,20 +210,28 @@ export class FarmScene extends Phaser.Scene {
     const map = this.make.tilemap({ width: WORLD_COLUMNS, height: WORLD_ROWS, tileWidth: TILE_SIZE, tileHeight: TILE_SIZE });
     const tileset = map.addTilesetImage('farm-tiles', 'farm-tiles', TILE_SIZE, TILE_SIZE, 0, 0);
     const groundLayer = map.createBlankLayer('Ground', tileset!, 0, 0)!;
+    this.pathLayer = map.createBlankLayer('Paths', tileset!, 0, 0)!;
+    this.fieldLayer = map.createBlankLayer('Fields', tileset!, 0, 0)!;
+    this.decorationLayer = map.createBlankLayer('Decorations', tileset!, 0, 0)!;
+    this.buildingLayer = map.createBlankLayer('Buildings', tileset!, 0, 0)!;
+
+    groundLayer.setDepth(0);
+    this.pathLayer.setDepth(2);
+    this.fieldLayer.setDepth(4);
+    this.decorationLayer.setDepth(7);
+    this.buildingLayer.setDepth(9);
 
     for (let y = 0; y < WORLD_ROWS; y += 1) {
       for (let x = 0; x < WORLD_COLUMNS; x += 1) {
-        groundLayer.putTileAt(this.tileIndexForBaseTile(x, y), x, y);
+        groundLayer.putTileAt(this.tileIndexForGrass(x, y), x, y);
+        if (this.isPathTile(x, y)) this.pathLayer.putTileAt(this.tileIndexForPath(x, y), x, y);
+        else if (this.isPathEdgeTile(x, y)) this.pathLayer.putTileAt(this.tileIndex('path_edge'), x, y);
+        if (this.isWaterTile(x, y)) this.pathLayer.putTileAt(this.tileIndex('water'), x, y);
       }
     }
 
-    this.fieldLayer = map.createBlankLayer('Fields', tileset!, 0, 0)!;
-    this.fieldLayer.setDepth(4);
+    this.createBoundaryFences();
     this.redrawFields();
-
-    this.decorationLayer = map.createBlankLayer('Decorations', tileset!, 0, 0)!;
-    this.decorationLayer.setDepth(7);
-
     this.createLandmarks();
     this.createExplorationProps();
   }
@@ -230,18 +240,36 @@ export class FarmScene extends Phaser.Scene {
     return getTileIndex(id);
   }
 
-  private tileIndexForBaseTile(x: number, y: number) {
-    if (this.isFenceCorner(x, y)) return this.tileIndex('fence_corner');
-    if (y === 0 || y === WORLD_ROWS - 1) return this.tileIndex('fence_horizontal');
-    if (x === 0 || x === WORLD_COLUMNS - 1) return this.tileIndex('fence_vertical');
-    if (this.isWaterTile(x, y)) return this.tileIndex('water');
-    if (this.isPathTile(x, y)) return this.tileIndex('dirt_path');
-    if (this.isPathEdgeTile(x, y)) return this.tileIndex('dirt_path_edge');
-    return tileNoise(x, y) < 28 ? this.tileIndex('grass_dark') : this.tileIndex('grass_light');
+  private tileIndexForGrass(x: number, y: number) {
+    const noise = tileNoise(x, y);
+    if (noise < 5) return this.tileIndex('grass_flower');
+    if (noise < 10) return this.tileIndex('grass_clover');
+    if (noise < 16) return this.tileIndex('grass_worn');
+    if (noise < 21) return this.tileIndex('grass_rock_small');
+    if (noise < 42) return this.tileIndex('grass_dark');
+    return this.tileIndex('grass_base');
   }
 
-  private isFenceCorner(x: number, y: number) {
-    return (x === 0 || x === WORLD_COLUMNS - 1) && (y === 0 || y === WORLD_ROWS - 1);
+  private tileIndexForPath(x: number, y: number) {
+    const north = this.isPathTile(x, y - 1);
+    const east = this.isPathTile(x + 1, y);
+    const south = this.isPathTile(x, y + 1);
+    const west = this.isPathTile(x - 1, y);
+    const count = [north, east, south, west].filter(Boolean).length;
+
+    if (count >= 4) return this.tileIndex('path_cross');
+    if (count === 3) {
+      if (!north) return this.tileIndex('path_t_south');
+      if (!east) return this.tileIndex('path_t_west');
+      if (!south) return this.tileIndex('path_t_north');
+      return this.tileIndex('path_t_east');
+    }
+    if (north && east) return this.tileIndex('path_corner_ne');
+    if (east && south) return this.tileIndex('path_corner_se');
+    if (south && west) return this.tileIndex('path_corner_sw');
+    if (west && north) return this.tileIndex('path_corner_nw');
+    if (north || south) return this.tileIndex('path_vertical');
+    return this.tileIndex('path_horizontal');
   }
 
   private isWaterTile(x: number, y: number) {
@@ -271,6 +299,18 @@ export class FarmScene extends Phaser.Scene {
     return houseToFields || fieldConnector || eastRoad || southRoad || storageTurn;
   }
 
+  private createBoundaryFences() {
+    for (let x = 0; x < WORLD_COLUMNS; x += 1) {
+      this.buildingLayer.putTileAt(this.tileIndex(x === 0 || x === WORLD_COLUMNS - 1 ? 'fence_corner' : 'fence_horizontal'), x, 0);
+      this.buildingLayer.putTileAt(this.tileIndex(x === 0 || x === WORLD_COLUMNS - 1 ? 'fence_corner' : 'fence_horizontal'), x, WORLD_ROWS - 1);
+    }
+
+    for (let y = 1; y < WORLD_ROWS - 1; y += 1) {
+      this.buildingLayer.putTileAt(this.tileIndex('fence_vertical'), 0, y);
+      this.buildingLayer.putTileAt(this.tileIndex('fence_vertical'), WORLD_COLUMNS - 1, y);
+    }
+  }
+
   private createLandmarks() {
     this.createHouse();
     this.createCowPen();
@@ -278,54 +318,86 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private createHouse() {
-    const landmark = LANDMARKS.house;
-    const { x, y } = landmarkCenter(landmark);
-    const width = landmark.widthTiles * TILE_SIZE;
-    const height = landmark.heightTiles * TILE_SIZE;
+    const { tileX, tileY, widthTiles, heightTiles } = LANDMARKS.house;
+    const left = tileX - Math.floor(widthTiles / 2);
+    const top = tileY - Math.floor(heightTiles / 2);
 
-    this.add.rectangle(x, y, width, height, 0x8f4c2e).setDepth(8);
-    this.add.rectangle(x, y - 2.5 * TILE_SIZE, width + TILE_SIZE, 2 * TILE_SIZE, 0x5d2f25).setDepth(9);
-    this.add.rectangle(x - 2 * TILE_SIZE, y + TILE_SIZE, TILE_SIZE, 2 * TILE_SIZE, 0x3b2418).setDepth(10);
-    this.add.rectangle(x + 1.5 * TILE_SIZE, y, 1.5 * TILE_SIZE, TILE_SIZE, 0x83b7d8).setDepth(10);
-    this.add.text(x - 3 * TILE_SIZE, y - 0.5 * TILE_SIZE, 'HOUSE', { fontFamily: 'monospace', fontSize: '16px', color: '#fff4bd' }).setDepth(11);
-    this.addCollisionRect(x - width / 2, y - height / 2, width, height);
+    for (let x = left; x < left + widthTiles; x += 1) {
+      this.buildingLayer.putTileAt(this.tileIndex(x === left ? 'house_roof_left' : x === left + widthTiles - 1 ? 'house_roof_right' : 'house_roof'), x, top - 1);
+    }
+
+    this.buildingLayer.putTileAt(this.tileIndex('house_chimney'), left + 1, top - 2);
+
+    for (let y = top; y < top + heightTiles; y += 1) {
+      for (let x = left; x < left + widthTiles; x += 1) {
+        this.buildingLayer.putTileAt(this.tileIndex('house_wall'), x, y);
+      }
+    }
+
+    this.buildingLayer.putTileAt(this.tileIndex('house_window'), left + 1, top + 1);
+    this.buildingLayer.putTileAt(this.tileIndex('house_flower_box'), left + 2, top + 1);
+    this.buildingLayer.putTileAt(this.tileIndex('house_door'), left + 3, top + heightTiles - 1);
+    this.buildingLayer.putTileAt(this.tileIndex('house_window'), left + 5, top + 1);
+    this.buildingLayer.putTileAt(this.tileIndex('house_flower_box'), left + 5, top + 2);
+
+    this.addCollisionRect(left * TILE_SIZE, (top - 1) * TILE_SIZE, widthTiles * TILE_SIZE, (heightTiles + 1) * TILE_SIZE);
   }
 
   private createCowPen() {
-    const landmark = LANDMARKS.cowPen;
-    const { x, y } = landmarkCenter(landmark);
-    const width = landmark.widthTiles * TILE_SIZE;
-    const height = landmark.heightTiles * TILE_SIZE;
+    const { tileX, tileY, widthTiles, heightTiles } = LANDMARKS.cowPen;
+    const left = tileX - Math.floor(widthTiles / 2);
+    const top = tileY - Math.floor(heightTiles / 2);
+    const gateX = left + Math.floor(widthTiles / 2);
+    const bottom = top + heightTiles - 1;
 
-    this.add.rectangle(x, y, width, height, 0x6fbf4a).setDepth(6);
-    this.add.rectangle(x, y, width, 0.5 * TILE_SIZE, 0x8a5528).setDepth(9);
-    this.add.rectangle(x, y + height / 2 - 0.25 * TILE_SIZE, width, 0.5 * TILE_SIZE, 0x8a5528).setDepth(9);
-    this.add.rectangle(x - width / 2 + 0.25 * TILE_SIZE, y, 0.5 * TILE_SIZE, height, 0x8a5528).setDepth(9);
-    this.add.rectangle(x + width / 2 - 0.25 * TILE_SIZE, y, 0.5 * TILE_SIZE, height, 0x8a5528).setDepth(9);
-    this.add.rectangle(x - TILE_SIZE, y + 0.5 * TILE_SIZE, 2 * TILE_SIZE, TILE_SIZE, 0xffffff).setDepth(10);
-    this.add.rectangle(x - 2 * TILE_SIZE, y, TILE_SIZE, TILE_SIZE, 0x2f2d2b).setDepth(11);
-    this.add.text(x - 2 * TILE_SIZE, y - 0.5 * TILE_SIZE, 'COW PEN', { fontFamily: 'monospace', fontSize: '16px', color: '#2d241a' }).setDepth(11);
-    this.addCollisionRect(x - width / 2, y - height / 2, width, 0.5 * TILE_SIZE);
-    this.addCollisionRect(x - width / 2, y + height / 2 - 0.5 * TILE_SIZE, width, 0.5 * TILE_SIZE);
-    this.addCollisionRect(x - width / 2, y - height / 2, 0.5 * TILE_SIZE, height);
-    this.addCollisionRect(x + width / 2 - 0.5 * TILE_SIZE, y - height / 2, 0.5 * TILE_SIZE, height);
+    for (let y = top + 1; y < bottom; y += 1) {
+      for (let x = left + 1; x < left + widthTiles - 1; x += 1) {
+        this.pathLayer.putTileAt(this.tileIndex('corral_dirt'), x, y);
+      }
+    }
+
+    for (let x = left; x < left + widthTiles; x += 1) {
+      this.buildingLayer.putTileAt(this.tileIndex('fence_horizontal'), x, top);
+      this.buildingLayer.putTileAt(this.tileIndex(x === gateX ? 'fence_gate' : 'fence_horizontal'), x, bottom);
+      this.addCollisionRect(x * TILE_SIZE, top * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+      if (x !== gateX) this.addCollisionRect(x * TILE_SIZE, bottom * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+    }
+
+    for (let y = top + 1; y < bottom; y += 1) {
+      this.buildingLayer.putTileAt(this.tileIndex('fence_vertical'), left, y);
+      this.buildingLayer.putTileAt(this.tileIndex('fence_vertical'), left + widthTiles - 1, y);
+      this.addCollisionRect(left * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+      this.addCollisionRect((left + widthTiles - 1) * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+    }
+
+    this.buildingLayer.putTileAt(this.tileIndex('fence_corner'), left, top);
+    this.buildingLayer.putTileAt(this.tileIndex('fence_corner'), left + widthTiles - 1, top);
+    this.buildingLayer.putTileAt(this.tileIndex('fence_corner'), left, bottom);
+    this.buildingLayer.putTileAt(this.tileIndex('fence_corner'), left + widthTiles - 1, bottom);
   }
 
   private createStorage() {
-    const landmark = LANDMARKS.storage;
-    const { x, y } = landmarkCenter(landmark);
-    const width = landmark.widthTiles * TILE_SIZE;
-    const height = landmark.heightTiles * TILE_SIZE;
+    const { tileX, tileY, widthTiles, heightTiles } = LANDMARKS.storage;
+    const left = tileX - Math.floor(widthTiles / 2);
+    const top = tileY - Math.floor(heightTiles / 2);
 
-    this.add.rectangle(x, y, width, height, 0x7b5a35).setDepth(8);
-    this.add.rectangle(x, y - 2 * TILE_SIZE, width + TILE_SIZE, TILE_SIZE, 0x4b3320).setDepth(9);
-    this.add.rectangle(x - 1.5 * TILE_SIZE, y + TILE_SIZE, TILE_SIZE, 2 * TILE_SIZE, 0x2f2418).setDepth(10);
-    this.add.text(x - 2.5 * TILE_SIZE, y, 'STORAGE', { fontFamily: 'monospace', fontSize: '16px', color: '#fff4bd' }).setDepth(11);
-    this.addCollisionRect(x - width / 2, y - height / 2, width, height);
+    for (let x = left; x < left + widthTiles; x += 1) {
+      this.buildingLayer.putTileAt(this.tileIndex(x === left ? 'house_roof_left' : x === left + widthTiles - 1 ? 'house_roof_right' : 'house_roof'), x, top - 1);
+    }
+
+    for (let y = top; y < top + heightTiles; y += 1) {
+      for (let x = left; x < left + widthTiles; x += 1) {
+        this.buildingLayer.putTileAt(this.tileIndex('house_wall'), x, y);
+      }
+    }
+
+    this.buildingLayer.putTileAt(this.tileIndex('house_door'), left + 1, top + heightTiles - 1);
+    this.buildingLayer.putTileAt(this.tileIndex('house_window'), left + 4, top + 1);
+    this.addCollisionRect(left * TILE_SIZE, (top - 1) * TILE_SIZE, widthTiles * TILE_SIZE, (heightTiles + 1) * TILE_SIZE);
   }
 
   private createExplorationProps() {
-    for (let i = 0; i < 130; i += 1) {
+    for (let i = 0; i < 180; i += 1) {
       const tileX = 5 + ((i * 11) % (WORLD_COLUMNS - 10));
       const tileY = 5 + ((i * 7) % (WORLD_ROWS - 10));
       const x = tileCenter(tileX);
@@ -333,8 +405,9 @@ export class FarmScene extends Phaser.Scene {
 
       if (this.isNearLandmark(x, y) || this.isPathTile(tileX, tileY) || this.isPathEdgeTile(tileX, tileY)) continue;
 
-      if (i % 5 === 0) this.placeDecorationTile('tree', tileX, tileY, true);
-      else if (i % 5 === 1) this.placeDecorationTile('rock', tileX, tileY, true);
+      if (i % 7 === 0) this.placeDecorationTile('tree', tileX, tileY, true);
+      else if (i % 7 === 1) this.placeDecorationTile('bush', tileX, tileY, true);
+      else if (i % 7 === 2) this.placeDecorationTile('rock', tileX, tileY, true);
       else if (i % 3 === 0) this.placeDecorationTile('flower', tileX, tileY, false);
     }
   }
@@ -352,10 +425,10 @@ export class FarmScene extends Phaser.Scene {
     const cowPen = landmarkCenter(LANDMARKS.cowPen);
     const storage = landmarkCenter(LANDMARKS.storage);
     const protectedAreas = [
-      { x: house.x, y: house.y, radius: 12 * TILE_SIZE },
+      { x: house.x, y: house.y, radius: 13 * TILE_SIZE },
       { x: tileCenter(24), y: tileCenter(42), radius: 9 * TILE_SIZE },
       { x: tileCenter(28), y: tileCenter(72), radius: 9 * TILE_SIZE },
-      { x: cowPen.x, y: cowPen.y, radius: 10 * TILE_SIZE },
+      { x: cowPen.x, y: cowPen.y, radius: 11 * TILE_SIZE },
       { x: storage.x, y: storage.y, radius: 10 * TILE_SIZE },
     ];
 
