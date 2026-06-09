@@ -10,20 +10,24 @@
   box-sizing: border-box;
 }
 
-body {
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
   margin: 0;
+  overflow: hidden;
+}
+
+body {
   min-width: 320px;
   min-height: 100vh;
-  background:
-    linear-gradient(45deg, rgba(255, 255, 255, 0.03) 25%, transparent 25%),
-    linear-gradient(-45deg, rgba(255, 255, 255, 0.03) 25%, transparent 25%),
-    #1d2b22;
-  background-size: 18px 18px;
+  background: #1d2b22;
 }
 
 button {
   width: 100%;
-  min-height: 42px;
+  min-height: 40px;
   border: 3px solid #2a1f16;
   border-radius: 0;
   background: #f0c15f;
@@ -47,26 +51,66 @@ button:active {
 }
 
 .app-shell {
-  width: min(1180px, 100%);
-  margin: 0 auto;
-  padding: 20px;
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.world-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  width: 100vw;
+  height: 100vh;
+  background: #2f6f43;
+  image-rendering: pixelated;
+}
+
+.world-layer canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
 }
 
 .top-panel,
 .side-panel,
-.game-stage {
+.notification {
+  position: fixed;
+  z-index: 2;
   border: 4px solid #2a1f16;
-  background: #375138;
-  box-shadow: 6px 6px 0 #151d17;
+  background: rgba(55, 81, 56, 0.94);
+  box-shadow: 6px 6px 0 rgba(21, 29, 23, 0.78);
 }
 
 .top-panel {
+  top: 14px;
+  left: 14px;
+  right: 14px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  margin-bottom: 18px;
-  padding: 16px;
+  min-height: 86px;
+  padding: 12px 16px;
+}
+
+.left-panel,
+.right-panel {
+  top: 118px;
+  width: 232px;
+  max-height: calc(100vh - 188px);
+  padding: 14px;
+  overflow: hidden;
+}
+
+.left-panel {
+  left: 14px;
+}
+
+.right-panel {
+  right: 14px;
 }
 
 .eyebrow,
@@ -86,7 +130,7 @@ p {
 h1 {
   margin-top: 4px;
   color: #fff4bd;
-  font-size: clamp(1.6rem, 4vw, 2.6rem);
+  font-size: 2rem;
 }
 
 h2 {
@@ -98,18 +142,19 @@ h2 {
   display: grid;
   grid-template-columns: repeat(3, minmax(92px, 1fr));
   gap: 10px;
-  width: min(430px, 100%);
+  width: min(430px, 42vw);
 }
 
 .hud-card {
   border: 3px solid #2a1f16;
   background: #223827;
-  padding: 10px;
+  padding: 8px 10px;
   text-align: center;
 }
 
 .hud-card span,
-.inventory-list dt {
+.inventory-list dt,
+.field-list dt {
   display: block;
   color: #cbd7a3;
   font-size: 0.76rem;
@@ -121,19 +166,7 @@ h2 {
   display: block;
   margin-top: 4px;
   color: #fff4bd;
-  font-size: 1.35rem;
-}
-
-.game-layout {
-  display: grid;
-  grid-template-columns: minmax(190px, 230px) minmax(320px, 1fr) minmax(170px, 210px);
-  gap: 18px;
-  align-items: start;
-}
-
-.side-panel,
-.game-stage {
-  padding: 14px;
+  font-size: 1.25rem;
 }
 
 .panel-block + .panel-block {
@@ -148,51 +181,29 @@ h2 {
 
 .status-line,
 .notification {
-  margin-top: 8px;
   color: #fff4bd;
   line-height: 1.45;
 }
 
-.game-stage {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.game-root {
-  display: flex;
-  justify-content: center;
-  width: 100%;
-  max-width: 640px;
-  aspect-ratio: 640 / 416;
-  border: 4px solid #2a1f16;
-  background: #2f6f43;
-  image-rendering: pixelated;
-  overflow: hidden;
-}
-
-.game-root canvas {
-  display: block;
-  max-width: 100%;
-  image-rendering: pixelated;
-}
-
 .notification {
-  width: 100%;
-  min-height: 42px;
-  border: 3px solid #2a1f16;
-  background: #223827;
-  padding: 10px;
+  left: 50%;
+  bottom: 14px;
+  width: min(560px, calc(100vw - 28px));
+  min-height: 44px;
+  padding: 10px 14px;
   text-align: center;
+  transform: translateX(-50%);
 }
 
-.inventory-list {
+.inventory-list,
+.field-list {
   display: grid;
   gap: 10px;
   margin: 12px 0 0;
 }
 
-.inventory-list div {
+.inventory-list div,
+.field-list div {
   display: flex;
   justify-content: space-between;
   gap: 10px;
@@ -200,33 +211,45 @@ h2 {
   padding-bottom: 6px;
 }
 
-.inventory-list dd {
+.inventory-list dd,
+.field-list dd {
   margin: 0;
   color: #fff4bd;
   font-weight: 700;
 }
 
-@media (max-width: 920px) {
-  .top-panel,
-  .game-layout {
-    grid-template-columns: 1fr;
-  }
-
+@media (max-width: 860px) {
   .top-panel {
     display: grid;
+    min-height: auto;
   }
 
   .hud-grid {
     width: 100%;
   }
+
+  .left-panel,
+  .right-panel {
+    top: auto;
+    bottom: 72px;
+    width: calc(50vw - 21px);
+    max-height: 42vh;
+  }
 }
 
 @media (max-width: 560px) {
-  .app-shell {
-    padding: 12px;
+  .top-panel {
+    left: 8px;
+    right: 8px;
+    top: 8px;
   }
 
   .hud-grid {
     grid-template-columns: 1fr;
+  }
+
+  .left-panel,
+  .right-panel {
+    display: none;
   }
 }
