@@ -9,16 +9,20 @@ export interface FieldRecord {
 
 export class FieldSystem {
   private readonly fields: FieldRecord[] = [
-    { id: 1, tileX: 6, tileY: 5, state: 'Harvested' },
-    { id: 2, tileX: 8, tileY: 5, state: 'Locked' },
+    { id: 1, tileX: 24, tileY: 42, state: 'Harvested' },
+    { id: 2, tileX: 28, tileY: 72, state: 'Locked' },
   ];
 
   get snapshots(): FieldSnapshot[] {
     return this.fields.map(({ id, state }) => ({ id, state }));
   }
 
+  get allFields(): FieldRecord[] {
+    return this.fields;
+  }
+
   getFieldAt(tileX: number, tileY: number) {
-    return this.fields.find((field) => field.tileX === tileX && field.tileY === tileY) ?? null;
+    return this.fields.find((field) => Math.abs(field.tileX - tileX) <= 1 && Math.abs(field.tileY - tileY) <= 1) ?? null;
   }
 
   getFirstUnlockedField() {
