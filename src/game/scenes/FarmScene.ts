@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { createPixelAssets } from '../assets/createPixelAssets';
+import { getTileIndex, preloadTilePngs, type TileId } from '../assets/tileRegistry';
 import { emitGameEvent } from '../eventBus';
 import { EconomySystem } from '../systems/EconomySystem';
 import { FieldSystem } from '../systems/FieldSystem';
@@ -21,17 +22,6 @@ const LANDMARKS = {
   house: { tileX: 16, tileY: 13, widthTiles: 7, heightTiles: 5 },
   cowPen: { tileX: 99, tileY: 39, widthTiles: 10, heightTiles: 7 },
   storage: { tileX: 61, tileY: 81, widthTiles: 7, heightTiles: 4 },
-} as const;
-
-const TILE_INDEX = {
-  grass: 0,
-  dirtPath: 1,
-  fieldHarvested: 2,
-  fieldPrepared: 3,
-  fieldPlanted: 4,
-  fieldLocked: 5,
-  fence: 6,
-  water: 7,
 } as const;
 
 interface TravelTask {
@@ -58,11 +48,16 @@ function landmarkCenter(landmark: { tileX: number; tileY: number }) {
   };
 }
 
+function tileNoise(x: number, y: number) {
+  return Math.abs((x * 73856093) ^ (y * 19349663)) % 100;
+}
+
 export class FarmScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
   private maya!: Phaser.GameObjects.Sprite;
   private fieldLayer!: Phaser.Tilemaps.TilemapLayer;
+  private decorationLayer!: Phaser.Tilemaps.TilemapLayer;
   private collisionRects: Phaser.Geom.Rectangle[] = [];
   private mayaX = tileCenter(17);
   private mayaY = tileCenter(19);
@@ -78,6 +73,10 @@ export class FarmScene extends Phaser.Scene {
 
   constructor() {
     super('FarmScene');
+  }
+
+  preload() {
+    preloadTilePngs(this);
   }
 
   create() {
@@ -220,15 +219,46 @@ export class FarmScene extends Phaser.Scene {
     this.fieldLayer.setDepth(4);
     this.redrawFields();
 
+    this.decorationLayer = map.createBlankLayer('Decorations', tileset!, 0, 0)!;
+    this.decorationLayer.setDepth(7);
+
     this.createLandmarks();
     this.createExplorationProps();
   }
 
+  private tileIndex(id: TileId) {
+    return getTileIndex(id);
+  }
+
   private tileIndexForBaseTile(x: number, y: number) {
-    if (x === 0 || y === 0 || x === WORLD_COLUMNS - 1 || y === WORLD_ROWS - 1) return TILE_INDEX.fence;
-    if (this.isPathTile(x, y)) return TILE_INDEX.dirtPath;
-    if ((x === 90 || x === 91) && y > 16 && y < 44) return TILE_INDEX.water;
-    return TILE_INDEX.grass;
+    if (this.isFenceCorner(x, y)) return this.tileIndex('fence_corner');
+    if (y === 0 || y === WORLD_ROWS - 1) return this.tileIndex('fence_horizontal');
+    if (x === 0 || x === WORLD_COLUMNS - 1) return this.tileIndex('fence_vertical');
+    if (this.isWaterTile(x, y)) return this.tileIndex('water');
+    if (this.isPathTile(x, y)) return this.tileIndex('dirt_path');
+    if (this.isPathEdgeTile(x, y)) return this.tileIndex('dirt_path_edge');
+    return tileNoise(x, y) < 28 ? this.tileIndex('grass_dark') : this.tileIndex('grass_light');
+  }
+
+  private isFenceCorner(x: number, y: number) {
+    return (x === 0 || x === WORLD_COLUMNS - 1) && (y === 0 || y === WORLD_ROWS - 1);
+  }
+
+  private isWaterTile(x: number, y: number) {
+    return (x === 90 || x === 91) && y > 16 && y < 44;
+  }
+
+  private isPathEdgeTile(x: number, y: number) {
+    if (this.isWaterTile(x, y)) return false;
+
+    const neighbors = [
+      [x + 1, y],
+      [x - 1, y],
+      [x, y + 1],
+      [x, y - 1],
+    ];
+
+    return neighbors.some(([neighborX, neighborY]) => this.isPathTile(neighborX, neighborY));
   }
 
   private isPathTile(x: number, y: number) {
@@ -295,38 +325,26 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private createExplorationProps() {
-    for (let i = 0; i < 95; i += 1) {
+    for (let i = 0; i < 130; i += 1) {
       const tileX = 5 + ((i * 11) % (WORLD_COLUMNS - 10));
       const tileY = 5 + ((i * 7) % (WORLD_ROWS - 10));
       const x = tileCenter(tileX);
       const y = tileCenter(tileY);
 
-      if (this.isNearLandmark(x, y)) continue;
+      if (this.isNearLandmark(x, y) || this.isPathTile(tileX, tileY) || this.isPathEdgeTile(tileX, tileY)) continue;
 
-      if (i % 3 === 0) this.createTree(x, y);
-      else if (i % 3 === 1) this.createRock(x, y);
-      else this.createFlower(x, y);
+      if (i % 5 === 0) this.placeDecorationTile('tree', tileX, tileY, true);
+      else if (i % 5 === 1) this.placeDecorationTile('rock', tileX, tileY, true);
+      else if (i % 3 === 0) this.placeDecorationTile('flower', tileX, tileY, false);
     }
   }
 
-  private createTree(x: number, y: number) {
-    this.add.rectangle(x, y + TILE_SIZE, TILE_SIZE, 2 * TILE_SIZE, 0x6b3f24).setDepth(7);
-    this.add.circle(x, y - TILE_SIZE, 1.6 * TILE_SIZE, 0x236d38).setDepth(8);
-    this.add.circle(x - TILE_SIZE, y, 1.2 * TILE_SIZE, 0x2f8545).setDepth(8);
-    this.add.circle(x + TILE_SIZE, y, 1.2 * TILE_SIZE, 0x2f8545).setDepth(8);
-    this.addCollisionRect(x - TILE_SIZE, y - 0.5 * TILE_SIZE, 2 * TILE_SIZE, 2.5 * TILE_SIZE);
-  }
+  private placeDecorationTile(tileId: TileId, tileX: number, tileY: number, blocksMovement: boolean) {
+    this.decorationLayer.putTileAt(this.tileIndex(tileId), tileX, tileY);
 
-  private createRock(x: number, y: number) {
-    this.add.rectangle(x, y, 1.5 * TILE_SIZE, TILE_SIZE, 0x6d6f72).setDepth(7);
-    this.add.rectangle(x - 0.25 * TILE_SIZE, y - 0.25 * TILE_SIZE, TILE_SIZE, 0.5 * TILE_SIZE, 0x8b8e8f).setDepth(8);
-    this.addCollisionRect(x - 0.75 * TILE_SIZE, y - 0.5 * TILE_SIZE, 1.5 * TILE_SIZE, TILE_SIZE);
-  }
-
-  private createFlower(x: number, y: number) {
-    this.add.rectangle(x, y + 0.25 * TILE_SIZE, 4, 0.5 * TILE_SIZE, 0x2f8545).setDepth(7);
-    this.add.rectangle(x - 6, y, 8, 8, 0xf0c15f).setDepth(8);
-    this.add.rectangle(x + 6, y, 8, 8, 0xd95a7a).setDepth(8);
+    if (blocksMovement) {
+      this.addCollisionRect(tileX * TILE_SIZE, tileY * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+    }
   }
 
   private isNearLandmark(x: number, y: number) {
@@ -357,10 +375,10 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private tileIndexForField(state: string) {
-    if (state === 'Prepared') return TILE_INDEX.fieldPrepared;
-    if (state === 'Planted') return TILE_INDEX.fieldPlanted;
-    if (state === 'Locked') return TILE_INDEX.fieldLocked;
-    return TILE_INDEX.fieldHarvested;
+    if (state === 'Prepared') return this.tileIndex('field_prepared');
+    if (state === 'Planted') return this.tileIndex('field_planted');
+    if (state === 'Locked') return this.tileIndex('field_locked');
+    return this.tileIndex('field_harvested');
   }
 
   private readTaskInput() {
