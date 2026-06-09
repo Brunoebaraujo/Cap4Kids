@@ -5,18 +5,24 @@ export function createGame(parent: HTMLElement) {
   return new Phaser.Game({
     type: Phaser.AUTO,
     parent,
-    width: 640,
-    height: 416,
+    width: parent.clientWidth || window.innerWidth,
+    height: parent.clientHeight || window.innerHeight,
     pixelArt: true,
     backgroundColor: '#2f6f43',
     scale: {
-      mode: Phaser.Scale.FIT,
-      autoCenter: Phaser.Scale.CENTER_BOTH,
+      mode: Phaser.Scale.RESIZE,
+      autoCenter: Phaser.Scale.NO_CENTER,
     },
     render: {
       antialias: false,
       pixelArt: true,
       roundPixels: true,
+    },
+    physics: {
+      default: 'arcade',
+      arcade: {
+        debug: false,
+      },
     },
     scene: [FarmScene],
   });
