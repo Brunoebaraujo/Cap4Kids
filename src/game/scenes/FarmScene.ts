@@ -19,7 +19,7 @@ const TASK_DURATION = 650;
 const TASK_ARRIVAL_DISTANCE = 3;
 
 const LANDMARKS = {
-  house: { tileX: 16, tileY: 13, widthTiles: 7, heightTiles: 5 },
+  house: { tileX: 28, tileY: 16, widthTiles: 7, heightTiles: 5 },
   cowPen: { tileX: 99, tileY: 39, widthTiles: 10, heightTiles: 7 },
   storage: { tileX: 61, tileY: 81, widthTiles: 7, heightTiles: 4 },
 } as const;
@@ -290,8 +290,8 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private isPathTile(x: number, y: number) {
-    const houseToFields = y >= 18 && y <= 19 && x >= 16 && x <= 30;
-    const fieldConnector = x >= 28 && x <= 29 && y >= 19 && y <= 73;
+    const houseToFields = y >= 19 && y <= 20 && x >= 28 && x <= 30;
+    const fieldConnector = x >= 28 && x <= 29 && y >= 20 && y <= 73;
     const eastRoad = y >= 43 && y <= 44 && x >= 29 && x <= 104;
     const southRoad = x >= 61 && x <= 62 && y >= 44 && y <= 82;
     const storageTurn = y >= 81 && y <= 82 && x >= 61 && x <= 67;
