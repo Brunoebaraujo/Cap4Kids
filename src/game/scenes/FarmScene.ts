@@ -4,12 +4,23 @@ import { emitGameEvent } from '../eventBus';
 import { EconomySystem } from '../systems/EconomySystem';
 import { FieldSystem } from '../systems/FieldSystem';
 import { TaskSystem } from '../systems/TaskSystem';
-import { TILE_SIZE, type AnimationState, type Direction, type TaskType } from '../types';
+import { TILE_SIZE, type AnimationState, type TaskType } from '../types';
 
-const WORLD_WIDTH = 20;
-const WORLD_HEIGHT = 13;
-const MOVE_DURATION = 150;
+export const WORLD_WIDTH = 4000;
+export const WORLD_HEIGHT = 3000;
+export const CAMERA_ZOOM = 2;
+const WORLD_COLUMNS = Math.ceil(WORLD_WIDTH / TILE_SIZE);
+const WORLD_ROWS = Math.ceil(WORLD_HEIGHT / TILE_SIZE);
+const MAYA_SPEED = 150;
+const CAMERA_LERP = 0.12;
 const TASK_DURATION = 650;
+
+const LANDMARKS = {
+  house: { x: 520, y: 430, width: 224, height: 168 },
+  cowPen: { x: 3180, y: 1260, width: 320, height: 224 },
+  storage: { x: 1960, y: 2580, width: 224, height: 144 },
+} as const;
+
 const TILE_INDEX = {
   grass: 0,
   dirtPath: 1,
@@ -26,9 +37,9 @@ export class FarmScene extends Phaser.Scene {
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
   private maya!: Phaser.GameObjects.Sprite;
   private fieldLayer!: Phaser.Tilemaps.TilemapLayer;
-  private tileX = 4;
-  private tileY = 6;
-  private moving = false;
+  private collisionRects: Phaser.Geom.Rectangle[] = [];
+  private mayaX = 560;
+  private mayaY = 620;
   private animationState: AnimationState = 'idle';
 
   private readonly fields = new FieldSystem();
@@ -43,34 +54,35 @@ export class FarmScene extends Phaser.Scene {
     createPixelAssets(this);
     this.createAnimations();
     this.createWorld();
+    this.createControls();
 
-    this.cursors = this.input.keyboard!.createCursorKeys();
-    this.keys = this.input.keyboard!.addKeys('W,A,S,D,SPACE,ONE,TWO,THREE,FOUR') as Record<string, Phaser.Input.Keyboard.Key>;
-
-    this.maya = this.add.sprite(this.tileX * TILE_SIZE + 16, this.tileY * TILE_SIZE + 16, 'maya', 0);
-    this.maya.setDepth(10);
+    this.maya = this.add.sprite(this.mayaX, this.mayaY, 'maya', 0);
+    this.maya.setDepth(20);
     this.maya.play('maya-idle');
 
-    this.publishState('Welcome to Capitalism 4 Kids.');
+    this.configureCamera();
+    this.publishState('Welcome to the expanded farm.');
   }
 
-  update() {
-    if (this.moving) return;
-
-    if (Phaser.Input.Keyboard.JustDown(this.keys.ONE)) this.enqueueTask('Prepare Soil');
-    if (Phaser.Input.Keyboard.JustDown(this.keys.TWO)) this.enqueueTask('Plant Wheat');
-    if (Phaser.Input.Keyboard.JustDown(this.keys.THREE)) this.enqueueTask('Harvest Wheat');
-    if (Phaser.Input.Keyboard.JustDown(this.keys.FOUR)) this.enqueueTask('Milk Cow');
-
-    if (this.tasks.currentTask) return;
-
-    const direction = this.readDirection();
-    if (direction) {
-      this.moveMaya(direction);
-      return;
-    }
+  update(_time: number, delta: number) {
+    this.readTaskInput();
+    this.moveMaya(delta / 1000);
 
     if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) this.performContextAction();
+  }
+
+  private createControls() {
+    this.cursors = this.input.keyboard!.createCursorKeys();
+    this.keys = this.input.keyboard!.addKeys('W,A,S,D,SPACE,ONE,TWO,THREE,FOUR') as Record<string, Phaser.Input.Keyboard.Key>;
+    this.input.keyboard!.addCapture(['W', 'A', 'S', 'D', 'SPACE', 'UP', 'DOWN', 'LEFT', 'RIGHT']);
+  }
+
+  private configureCamera() {
+    const camera = this.cameras.main;
+    camera.setBackgroundColor('#2f6f43');
+    camera.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    camera.setZoom(CAMERA_ZOOM);
+    camera.startFollow(this.maya, true, CAMERA_LERP, CAMERA_LERP);
   }
 
   private createAnimations() {
@@ -90,49 +102,138 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private createWorld() {
-    this.cameras.main.setBackgroundColor('#2f6f43');
-    const map = this.make.tilemap({ width: WORLD_WIDTH, height: WORLD_HEIGHT, tileWidth: TILE_SIZE, tileHeight: TILE_SIZE });
+    this.physics.world.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+
+    const map = this.make.tilemap({ width: WORLD_COLUMNS, height: WORLD_ROWS, tileWidth: TILE_SIZE, tileHeight: TILE_SIZE });
     const tileset = map.addTilesetImage('farm-tiles', 'farm-tiles', TILE_SIZE, TILE_SIZE, 0, 0);
     const groundLayer = map.createBlankLayer('Ground', tileset!, 0, 0)!;
 
-    for (let y = 0; y < WORLD_HEIGHT; y += 1) {
-      for (let x = 0; x < WORLD_WIDTH; x += 1) {
+    for (let y = 0; y < WORLD_ROWS; y += 1) {
+      for (let x = 0; x < WORLD_COLUMNS; x += 1) {
         groundLayer.putTileAt(this.tileIndexForBaseTile(x, y), x, y);
       }
     }
 
     this.fieldLayer = map.createBlankLayer('Fields', tileset!, 0, 0)!;
-    this.fieldLayer.setDepth(2);
+    this.fieldLayer.setDepth(4);
     this.redrawFields();
 
-    groundLayer.putTileAt(TILE_INDEX.water, 13, 4);
-    groundLayer.putTileAt(TILE_INDEX.water, 14, 4);
-    groundLayer.putTileAt(TILE_INDEX.water, 13, 5);
-    groundLayer.putTileAt(TILE_INDEX.water, 14, 5);
-
-    this.add.text(9, 9, '1 Soil  2 Seed  3 Harvest  4 Milk  Space Context', {
-      fontFamily: 'monospace',
-      fontSize: '11px',
-      color: '#fff8d6',
-      backgroundColor: '#2d241a',
-      padding: { x: 4, y: 3 },
-    }).setDepth(20);
+    this.createLandmarks();
+    this.createExplorationProps();
   }
 
   private tileIndexForBaseTile(x: number, y: number) {
-    if (x === 0 || y === 0 || x === WORLD_WIDTH - 1 || y === WORLD_HEIGHT - 1) return TILE_INDEX.fence;
-    if (y === 7 || (x > 2 && x < 11 && y === 6)) return TILE_INDEX.dirtPath;
+    if (x === 0 || y === 0 || x === WORLD_COLUMNS - 1 || y === WORLD_ROWS - 1) return TILE_INDEX.fence;
+    if (this.isPathTile(x, y)) return TILE_INDEX.dirtPath;
+    if ((x === 90 || x === 91) && y > 16 && y < 44) return TILE_INDEX.water;
     return TILE_INDEX.grass;
+  }
+
+  private isPathTile(x: number, y: number) {
+    const houseToFields = y >= 18 && y <= 19 && x >= 16 && x <= 30;
+    const fieldConnector = x >= 28 && x <= 29 && y >= 19 && y <= 73;
+    const eastRoad = y >= 43 && y <= 44 && x >= 29 && x <= 104;
+    const southRoad = x >= 61 && x <= 62 && y >= 44 && y <= 82;
+    const storageTurn = y >= 81 && y <= 82 && x >= 61 && x <= 67;
+
+    return houseToFields || fieldConnector || eastRoad || southRoad || storageTurn;
+  }
+
+  private createLandmarks() {
+    this.createHouse();
+    this.createCowPen();
+    this.createStorage();
+  }
+
+  private createHouse() {
+    const { x, y, width, height } = LANDMARKS.house;
+    this.add.rectangle(x, y, width, height, 0x8f4c2e).setDepth(8);
+    this.add.rectangle(x, y - 78, width + 28, 64, 0x5d2f25).setDepth(9);
+    this.add.rectangle(x - 62, y + 36, 42, 66, 0x3b2418).setDepth(10);
+    this.add.rectangle(x + 48, y + 6, 52, 42, 0x83b7d8).setDepth(10);
+    this.add.text(x - 92, y - 18, 'HOUSE', { fontFamily: 'monospace', fontSize: '16px', color: '#fff4bd' }).setDepth(11);
+    this.addCollisionRect(x - width / 2, y - height / 2, width, height);
+  }
+
+  private createCowPen() {
+    const { x, y, width, height } = LANDMARKS.cowPen;
+    this.add.rectangle(x, y, width, height, 0x6fbf4a).setDepth(6);
+    this.add.rectangle(x, y, width, 16, 0x8a5528).setDepth(9);
+    this.add.rectangle(x, y + height / 2 - 8, width, 16, 0x8a5528).setDepth(9);
+    this.add.rectangle(x - width / 2 + 8, y, 16, height, 0x8a5528).setDepth(9);
+    this.add.rectangle(x + width / 2 - 8, y, 16, height, 0x8a5528).setDepth(9);
+    this.add.rectangle(x - 34, y + 18, 62, 42, 0xffffff).setDepth(10);
+    this.add.rectangle(x - 60, y + 5, 28, 28, 0x2f2d2b).setDepth(11);
+    this.add.text(x - 70, y - 14, 'COW PEN', { fontFamily: 'monospace', fontSize: '16px', color: '#2d241a' }).setDepth(11);
+    this.addCollisionRect(x - width / 2, y - height / 2, width, 18);
+    this.addCollisionRect(x - width / 2, y + height / 2 - 18, width, 18);
+    this.addCollisionRect(x - width / 2, y - height / 2, 18, height);
+    this.addCollisionRect(x + width / 2 - 18, y - height / 2, 18, height);
+  }
+
+  private createStorage() {
+    const { x, y, width, height } = LANDMARKS.storage;
+    this.add.rectangle(x, y, width, height, 0x7b5a35).setDepth(8);
+    this.add.rectangle(x, y - 68, width + 18, 42, 0x4b3320).setDepth(9);
+    this.add.rectangle(x - 52, y + 30, 42, 58, 0x2f2418).setDepth(10);
+    this.add.text(x - 82, y - 10, 'STORAGE', { fontFamily: 'monospace', fontSize: '16px', color: '#fff4bd' }).setDepth(11);
+    this.addCollisionRect(x - width / 2, y - height / 2, width, height);
+  }
+
+  private createExplorationProps() {
+    for (let i = 0; i < 95; i += 1) {
+      const x = 180 + ((i * 337) % (WORLD_WIDTH - 360));
+      const y = 170 + ((i * 239) % (WORLD_HEIGHT - 340));
+
+      if (this.isNearLandmark(x, y)) continue;
+
+      if (i % 3 === 0) this.createTree(x, y);
+      else if (i % 3 === 1) this.createRock(x, y);
+      else this.createFlower(x, y);
+    }
+  }
+
+  private createTree(x: number, y: number) {
+    this.add.rectangle(x, y + 20, 26, 54, 0x6b3f24).setDepth(7);
+    this.add.circle(x, y - 24, 52, 0x236d38).setDepth(8);
+    this.add.circle(x - 28, y - 4, 38, 0x2f8545).setDepth(8);
+    this.add.circle(x + 26, y - 2, 40, 0x2f8545).setDepth(8);
+    this.addCollisionRect(x - 32, y - 16, 64, 84);
+  }
+
+  private createRock(x: number, y: number) {
+    this.add.rectangle(x, y, 46, 32, 0x6d6f72).setDepth(7);
+    this.add.rectangle(x - 8, y - 10, 32, 16, 0x8b8e8f).setDepth(8);
+    this.addCollisionRect(x - 24, y - 18, 48, 36);
+  }
+
+  private createFlower(x: number, y: number) {
+    this.add.rectangle(x, y + 8, 4, 16, 0x2f8545).setDepth(7);
+    this.add.rectangle(x - 6, y, 8, 8, 0xf0c15f).setDepth(8);
+    this.add.rectangle(x + 6, y, 8, 8, 0xd95a7a).setDepth(8);
+  }
+
+  private isNearLandmark(x: number, y: number) {
+    const protectedAreas = [
+      { x: 540, y: 520, radius: 380 },
+      { x: 768, y: 1344, radius: 280 },
+      { x: 896, y: 2304, radius: 280 },
+      { x: 3180, y: 1260, radius: 320 },
+      { x: 1960, y: 2580, radius: 300 },
+    ];
+
+    return protectedAreas.some((area) => Phaser.Math.Distance.Between(x, y, area.x, area.y) < area.radius);
   }
 
   private redrawFields() {
     this.fieldLayer.fill(-1);
-    [
-      { x: 6, y: 5 },
-      { x: 8, y: 5 },
-    ].forEach(({ x, y }) => {
-      const field = this.fields.getFieldAt(x, y);
-      this.fieldLayer.putTileAt(field ? this.tileIndexForField(field.state) : TILE_INDEX.fieldHarvested, x, y);
+
+    this.fields.allFields.forEach((field) => {
+      for (let y = field.tileY - 1; y <= field.tileY + 1; y += 1) {
+        for (let x = field.tileX - 1; x <= field.tileX + 1; x += 1) {
+          this.fieldLayer.putTileAt(this.tileIndexForField(field.state), x, y);
+        }
+      }
     });
   }
 
@@ -143,43 +244,51 @@ export class FarmScene extends Phaser.Scene {
     return TILE_INDEX.fieldHarvested;
   }
 
-  private readDirection(): Direction | null {
-    if (this.cursors.left.isDown || this.keys.A.isDown) return 'left';
-    if (this.cursors.right.isDown || this.keys.D.isDown) return 'right';
-    if (this.cursors.up.isDown || this.keys.W.isDown) return 'up';
-    if (this.cursors.down.isDown || this.keys.S.isDown) return 'down';
-    return null;
+  private readTaskInput() {
+    if (Phaser.Input.Keyboard.JustDown(this.keys.ONE)) this.enqueueTask('Prepare Soil');
+    if (Phaser.Input.Keyboard.JustDown(this.keys.TWO)) this.enqueueTask('Plant Wheat');
+    if (Phaser.Input.Keyboard.JustDown(this.keys.THREE)) this.enqueueTask('Harvest Wheat');
+    if (Phaser.Input.Keyboard.JustDown(this.keys.FOUR)) this.enqueueTask('Milk Cow');
   }
 
-  private moveMaya(direction: Direction) {
-    const deltas: Record<Direction, [number, number]> = { down: [0, 1], up: [0, -1], left: [-1, 0], right: [1, 0] };
-    const [dx, dy] = deltas[direction];
-    const nextX = Phaser.Math.Clamp(this.tileX + dx, 1, WORLD_WIDTH - 2);
-    const nextY = Phaser.Math.Clamp(this.tileY + dy, 1, WORLD_HEIGHT - 2);
+  private moveMaya(deltaSeconds: number) {
+    const inputX = Number(this.cursors.right.isDown || this.keys.D.isDown) - Number(this.cursors.left.isDown || this.keys.A.isDown);
+    const inputY = Number(this.cursors.down.isDown || this.keys.S.isDown) - Number(this.cursors.up.isDown || this.keys.W.isDown);
 
-    if (nextX === this.tileX && nextY === this.tileY) return;
+    if (inputX === 0 && inputY === 0) {
+      if (!this.tasks.currentTask && this.animationState === 'walk') this.setMayaAnimation('idle');
+      return;
+    }
 
-    this.tileX = nextX;
-    this.tileY = nextY;
-    this.moving = true;
-    this.setMayaAnimation('walk');
+    const vector = new Phaser.Math.Vector2(inputX, inputY).normalize().scale(MAYA_SPEED * deltaSeconds);
+    const nextX = Phaser.Math.Clamp(this.mayaX + vector.x, 16, WORLD_WIDTH - 16);
+    const nextY = Phaser.Math.Clamp(this.mayaY + vector.y, 16, WORLD_HEIGHT - 16);
 
-    this.tweens.add({
-      targets: this.maya,
-      x: this.tileX * TILE_SIZE + 16,
-      y: this.tileY * TILE_SIZE + 16,
-      duration: MOVE_DURATION,
-      ease: 'Linear',
-      onComplete: () => {
-        this.moving = false;
-        this.setMayaAnimation('idle');
-        this.publishState();
-      },
-    });
+    if (!this.collidesAt(nextX, this.mayaY)) this.mayaX = nextX;
+    if (!this.collidesAt(this.mayaX, nextY)) this.mayaY = nextY;
+
+    this.maya.setPosition(this.mayaX, this.mayaY);
+    if (!this.tasks.currentTask) this.setMayaAnimation('walk');
+    this.publishState();
+  }
+
+  private collidesAt(x: number, y: number) {
+    const mayaBounds = this.getMayaBounds(x, y);
+    return this.collisionRects.some((rect) => Phaser.Geom.Intersects.RectangleToRectangle(mayaBounds, rect));
+  }
+
+  private getMayaBounds(x: number, y: number) {
+    return new Phaser.Geom.Rectangle(x - 10, y - 8, 20, 20);
+  }
+
+  private addCollisionRect(x: number, y: number, width: number, height: number) {
+    this.collisionRects.push(new Phaser.Geom.Rectangle(x, y, width, height));
   }
 
   private performContextAction() {
-    const field = this.fields.getFieldAt(this.tileX, this.tileY) ?? this.fields.getFirstUnlockedField();
+    const tileX = Math.floor(this.mayaX / TILE_SIZE);
+    const tileY = Math.floor(this.mayaY / TILE_SIZE);
+    const field = this.fields.getFieldAt(tileX, tileY) ?? this.fields.getFirstUnlockedField();
     if (!field) return;
 
     if (field.state === 'Harvested') this.enqueueTask('Prepare Soil');
@@ -215,9 +324,11 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private applyTask(task: TaskType) {
-    const field = this.fields.getFieldAt(this.tileX, this.tileY) ?? this.fields.getFirstUnlockedField();
-    const fieldX = field?.tileX ?? this.tileX;
-    const fieldY = field?.tileY ?? this.tileY;
+    const tileX = Math.floor(this.mayaX / TILE_SIZE);
+    const tileY = Math.floor(this.mayaY / TILE_SIZE);
+    const field = this.fields.getFieldAt(tileX, tileY) ?? this.fields.getFirstUnlockedField();
+    const fieldX = field?.tileX ?? tileX;
+    const fieldY = field?.tileY ?? tileY;
 
     if (task === 'Prepare Soil') {
       return this.fields.prepare(fieldX, fieldY) ? 'Field prepared.' : 'No harvested field is available.';
