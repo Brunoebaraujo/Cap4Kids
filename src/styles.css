@@ -138,6 +138,24 @@ h2 {
   font-size: 1rem;
 }
 
+.maya-profile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.maya-portrait {
+  width: 56px;
+  height: 56px;
+  flex: 0 0 56px;
+  border: 3px solid #2a1f16;
+  background: #223827;
+  object-fit: cover;
+  object-position: center 18%;
+  image-rendering: pixelated;
+}
+
 .hud-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(92px, 1fr));
@@ -154,7 +172,8 @@ h2 {
 
 .hud-card span,
 .inventory-list dt,
-.field-list dt {
+.field-list dt,
+.debug-list dt {
   display: block;
   color: #cbd7a3;
   font-size: 0.76rem;
@@ -196,14 +215,16 @@ h2 {
 }
 
 .inventory-list,
-.field-list {
+.field-list,
+.debug-list {
   display: grid;
   gap: 10px;
   margin: 12px 0 0;
 }
 
 .inventory-list div,
-.field-list div {
+.field-list div,
+.debug-list div {
   display: flex;
   justify-content: space-between;
   gap: 10px;
@@ -212,10 +233,17 @@ h2 {
 }
 
 .inventory-list dd,
-.field-list dd {
+.field-list dd,
+.debug-list dd {
   margin: 0;
   color: #fff4bd;
   font-weight: 700;
+  text-align: right;
+}
+
+.debug-list dd {
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 860px) {

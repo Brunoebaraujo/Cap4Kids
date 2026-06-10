@@ -27,6 +27,16 @@ export interface FieldSnapshot {
   state: FieldState;
 }
 
+export interface MayaSnapshot {
+  animation: string;
+  direction: Direction;
+  x: number;
+  y: number;
+  frameWidth: number;
+  frameHeight: number;
+  state: AnimationState;
+}
+
 export interface GameSnapshot {
   economy: Economy;
   inventory: Inventory;
@@ -35,6 +45,7 @@ export interface GameSnapshot {
   fields: FieldSnapshot[];
   animationState: AnimationState;
   cameraMode: CameraMode;
+  maya: MayaSnapshot;
 }
 
 export interface GameEvents {

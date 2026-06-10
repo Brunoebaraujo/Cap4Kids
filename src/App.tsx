@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import mayaPortrait from './assets/characters/maya/portraits/maya-portrait.png';
 import { createGame } from './game/createGame';
 import { gameEvents } from './game/eventBus';
 import type { CameraMode, GameSnapshot, TaskType } from './game/types';
@@ -38,6 +39,15 @@ const initialSnapshot: GameSnapshot = {
   fields: [],
   animationState: 'idle',
   cameraMode: 'free',
+  maya: {
+    animation: 'idle_down',
+    direction: 'down',
+    x: 0,
+    y: 0,
+    frameWidth: 32,
+    frameHeight: 32,
+    state: 'idle',
+  },
 };
 
 function dispatchTaskKey(task: TaskType) {
@@ -102,9 +112,12 @@ export default function App() {
       <div ref={gameRootRef} className="world-layer" aria-label="Mundo da fazenda" />
 
       <section className="top-panel" aria-label="Painel principal">
-        <div>
-          <p className="eyebrow">Capitalism 4 Kids</p>
-          <h1>Fazenda da Maya</h1>
+        <div className="maya-profile">
+          <img src={mayaPortrait} alt="Retrato da Maya" className="maya-portrait" />
+          <div>
+            <p className="eyebrow">Capitalism 4 Kids</p>
+            <h1>Fazenda da Maya</h1>
+          </div>
         </div>
 
         <div className="hud-grid" aria-label="Resumo da economia">
@@ -145,9 +158,30 @@ export default function App() {
           <p className="status-line">{queuedTasks}</p>
         </div>
 
-        <div className="panel-block camera-debug">
-          <h2>Camera</h2>
-          <p className="status-line">{cameraLabels[snapshot.cameraMode]}</p>
+        <div className="panel-block debug-panel">
+          <h2>Debug Maya</h2>
+          <dl className="debug-list">
+            <div>
+              <dt>Animação</dt>
+              <dd>{snapshot.maya.animation}</dd>
+            </div>
+            <div>
+              <dt>Estado</dt>
+              <dd>{snapshot.maya.state}</dd>
+            </div>
+            <div>
+              <dt>Direção</dt>
+              <dd>{snapshot.maya.direction}</dd>
+            </div>
+            <div>
+              <dt>Posição</dt>
+              <dd>{snapshot.maya.x}, {snapshot.maya.y}</dd>
+            </div>
+            <div>
+              <dt>Camera</dt>
+              <dd>{cameraLabels[snapshot.cameraMode]}</dd>
+            </div>
+          </dl>
         </div>
       </aside>
 

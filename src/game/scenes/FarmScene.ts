@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { createPixelAssets } from '../assets/createPixelAssets';
 import { getTileIndex, preloadTilePngs, type TileId } from '../assets/tileRegistry';
+import { Maya } from '../characters/Maya';
 import { emitGameEvent } from '../eventBus';
 import { EconomySystem } from '../systems/EconomySystem';
 import { FieldSystem } from '../systems/FieldSystem';
@@ -55,7 +56,7 @@ function tileNoise(x: number, y: number) {
 export class FarmScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
-  private maya!: Phaser.GameObjects.Sprite;
+  private maya!: Maya;
   private pathLayer!: Phaser.Tilemaps.TilemapLayer;
   private fieldLayer!: Phaser.Tilemaps.TilemapLayer;
   private decorationLayer!: Phaser.Tilemaps.TilemapLayer;
@@ -79,17 +80,16 @@ export class FarmScene extends Phaser.Scene {
 
   preload() {
     preloadTilePngs(this);
+    Maya.preload(this);
   }
 
   create() {
     createPixelAssets(this);
-    this.createAnimations();
+    Maya.createAnimations(this);
     this.createWorld();
     this.createControls();
 
-    this.maya = this.add.sprite(this.mayaX, this.mayaY, 'maya', 0);
-    this.maya.setDepth(20);
-    this.maya.play('maya-idle');
+    this.maya = new Maya(this, this.mayaX, this.mayaY);
 
     this.configureCamera();
     this.createCameraStatusText();
@@ -173,7 +173,8 @@ export class FarmScene extends Phaser.Scene {
 
     const camera = this.cameras.main;
     if (mode === 'followMaya') {
-      camera.startFollow(this.maya, true, CAMERA_LERP, CAMERA_LERP);
+      camera.centerOn(this.maya.x, this.maya.y);
+      camera.startFollow(this.maya.sprite, true, CAMERA_LERP, CAMERA_LERP);
     } else {
       camera.stopFollow();
       this.setCameraScroll(camera.scrollX, camera.scrollY);
@@ -186,22 +187,6 @@ export class FarmScene extends Phaser.Scene {
   private updateCameraStatusText() {
     if (!this.cameraStatusText) return;
     this.cameraStatusText.setText(this.cameraMode === 'free' ? 'Camera: Livre' : 'Camera: Seguindo Maya');
-  }
-
-  private createAnimations() {
-    const animationMap: Array<[string, number]> = [
-      ['idle', 0],
-      ['walk', 1],
-      ['prepare soil', 2],
-      ['plant', 3],
-      ['harvest', 4],
-      ['milk cow', 5],
-    ];
-
-    animationMap.forEach(([key, frame]) => {
-      if (this.anims.exists(`maya-${key}`)) return;
-      this.anims.create({ key: `maya-${key}`, frames: [{ key: 'maya', frame }], frameRate: 1 });
-    });
   }
 
   private createWorld() {
@@ -488,6 +473,7 @@ export class FarmScene extends Phaser.Scene {
       this.mayaX = this.activeTravel.targetX;
       this.mayaY = this.activeTravel.targetY;
       this.maya.setPosition(this.mayaX, this.mayaY);
+      this.maya.playIdle();
       const task = this.activeTravel.task;
       this.activeTravel = null;
       this.startTaskAnimation(task);
@@ -505,7 +491,8 @@ export class FarmScene extends Phaser.Scene {
     if (!this.collidesAt(this.mayaX, nextY)) this.mayaY = nextY;
 
     this.maya.setPosition(this.mayaX, this.mayaY);
-    this.setMayaAnimation('walk');
+    this.animationState = 'walk';
+    this.maya.playWalkToward(vector.x, vector.y);
     this.publishState();
   }
 
@@ -546,7 +533,8 @@ export class FarmScene extends Phaser.Scene {
       ...this.getTaskDestination(task),
     };
     this.setCameraMode('followMaya');
-    this.setMayaAnimation('walk');
+    this.animationState = 'walk';
+    this.maya.playWalkToward(this.activeTravel.targetX - this.mayaX, this.activeTravel.targetY - this.mayaY);
     this.publishState(`${task} destination selected.`);
   }
 
@@ -622,7 +610,8 @@ export class FarmScene extends Phaser.Scene {
 
   private setMayaAnimation(state: AnimationState) {
     this.animationState = state;
-    this.maya.play(`maya-${state}`);
+    if (state === 'idle') this.maya.playIdle();
+    else if (state !== 'walk') this.maya.playTaskState(state);
   }
 
   private publishState(notification?: string) {
@@ -634,6 +623,7 @@ export class FarmScene extends Phaser.Scene {
       fields: this.fields.snapshots,
       animationState: this.animationState,
       cameraMode: this.cameraMode,
+      maya: this.maya.getSnapshot(),
     });
 
     if (notification) emitGameEvent('notification', notification);
