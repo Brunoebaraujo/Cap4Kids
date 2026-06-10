@@ -3,10 +3,11 @@ import { createPixelAssets } from '../assets/createPixelAssets';
 import { getTileIndex, preloadTilePngs, type TileId } from '../assets/tileRegistry';
 import { Maya } from '../characters/Maya';
 import { emitGameEvent } from '../eventBus';
-import { EconomySystem } from '../systems/EconomySystem';
-import { FieldSystem } from '../systems/FieldSystem';
-import { TaskSystem } from '../systems/TaskSystem';
-import { TILE_SIZE, type AnimationState, type CameraMode, type TaskType } from '../types';
+import { EconomySystem, WHEAT_HARVEST_YIELD, WHEAT_PRICE, WHEAT_SEED_COST, type EconomySaveState } from '../systems/EconomySystem';
+import { FieldSystem, type FieldSaveState } from '../systems/FieldSystem';
+import { GameClockSystem } from '../systems/GameClockSystem';
+import { TaskSystem, type TaskSaveState } from '../systems/TaskSystem';
+import { TILE_SIZE, type AnimationState, type CameraMode, type GameClockSnapshot, type TaskType } from '../types';
 
 export const WORLD_WIDTH = 4000;
 export const WORLD_HEIGHT = 3000;
@@ -16,13 +17,15 @@ const WORLD_ROWS = Math.ceil(WORLD_HEIGHT / TILE_SIZE);
 const MAYA_SPEED = 150;
 const CAMERA_PAN_SPEED = 520;
 const CAMERA_LERP = 0.12;
-const TASK_DURATION = 650;
+const TASK_DURATION = 1.2;
 const TASK_ARRIVAL_DISTANCE = 3;
+const SAVE_KEY = 'cap4kids.save.v1';
 
 const LANDMARKS = {
   house: { tileX: 28, tileY: 16, widthTiles: 7, heightTiles: 5 },
   cowPen: { tileX: 99, tileY: 39, widthTiles: 10, heightTiles: 7 },
   storage: { tileX: 61, tileY: 81, widthTiles: 7, heightTiles: 4 },
+  shippingBin: { tileX: 66, tileY: 77, widthTiles: 3, heightTiles: 3 },
 } as const;
 
 interface TravelTask {
@@ -31,11 +34,24 @@ interface TravelTask {
   targetY: number;
 }
 
+interface ActiveWork {
+  task: TaskType;
+  elapsed: number;
+  duration: number;
+}
+
 interface CameraDragState {
   pointerX: number;
   pointerY: number;
   scrollX: number;
   scrollY: number;
+}
+
+interface SaveState {
+  economy: EconomySaveState;
+  fields: FieldSaveState;
+  tasks: TaskSaveState;
+  clock: GameClockSnapshot;
 }
 
 function tileCenter(tile: number) {
@@ -67,12 +83,14 @@ export class FarmScene extends Phaser.Scene {
   private animationState: AnimationState = 'idle';
   private cameraMode: CameraMode = 'free';
   private activeTravel: TravelTask | null = null;
+  private activeWork: ActiveWork | null = null;
   private cameraDrag: CameraDragState | null = null;
   private cameraStatusText!: Phaser.GameObjects.Text;
 
   private readonly fields = new FieldSystem();
   private readonly tasks = new TaskSystem();
   private readonly economy = new EconomySystem();
+  private readonly clock = new GameClockSystem();
 
   constructor() {
     super('FarmScene');
@@ -84,6 +102,7 @@ export class FarmScene extends Phaser.Scene {
   }
 
   create() {
+    this.loadGame();
     createPixelAssets(this);
     Maya.createAnimations(this);
     this.createWorld();
@@ -93,16 +112,37 @@ export class FarmScene extends Phaser.Scene {
 
     this.configureCamera();
     this.createCameraStatusText();
-    this.publishState('Camera livre: arraste o mapa ou use WASD/setas para explorar.');
+    this.bindActiveTimeEvents();
+
+    if (this.tasks.currentTask) this.beginTaskTravel(this.tasks.currentTask);
+    else this.publishState('Compre sementes, prepare o solo, plante trigo e venda no Shipping Bin.');
   }
 
   update(_time: number, delta: number) {
+    const active = this.isActiveSessionRunning();
+    if (this.clock.setRunning(active)) this.publishState(active ? 'Tempo ativo.' : 'Tempo pausado.');
+    if (!active) return;
+
     const deltaSeconds = delta / 1000;
+    const elapsedDays = this.clock.update(deltaSeconds);
+    for (let i = 0; i < elapsedDays; i += 1) {
+      this.economy.payDailyCost();
+    }
+
+    if (this.fields.updateGrowth(deltaSeconds)) {
+      this.redrawFields();
+      this.publishState('O trigo cresceu.');
+    }
 
     this.readTaskInput();
 
     if (this.activeTravel) {
       this.moveMayaToTask(deltaSeconds);
+      return;
+    }
+
+    if (this.activeWork) {
+      this.updateActiveWork(deltaSeconds);
       return;
     }
 
@@ -115,8 +155,8 @@ export class FarmScene extends Phaser.Scene {
 
   private createControls() {
     this.cursors = this.input.keyboard!.createCursorKeys();
-    this.keys = this.input.keyboard!.addKeys('W,A,S,D,SPACE,ONE,TWO,THREE,FOUR') as Record<string, Phaser.Input.Keyboard.Key>;
-    this.input.keyboard!.addCapture(['W', 'A', 'S', 'D', 'SPACE', 'UP', 'DOWN', 'LEFT', 'RIGHT']);
+    this.keys = this.input.keyboard!.addKeys('W,A,S,D,B,SPACE,ONE,TWO,THREE,FOUR,FIVE') as Record<string, Phaser.Input.Keyboard.Key>;
+    this.input.keyboard!.addCapture(['W', 'A', 'S', 'D', 'B', 'SPACE', 'UP', 'DOWN', 'LEFT', 'RIGHT']);
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (this.cameraMode !== 'free') return;
@@ -161,6 +201,16 @@ export class FarmScene extends Phaser.Scene {
     });
     this.cameraStatusText.setScrollFactor(0);
     this.cameraStatusText.setDepth(1000);
+  }
+
+  private bindActiveTimeEvents() {
+    document.addEventListener('visibilitychange', () => this.publishState());
+    window.addEventListener('blur', () => this.publishState('Tempo pausado.'));
+    window.addEventListener('focus', () => this.publishState('Tempo ativo.'));
+  }
+
+  private isActiveSessionRunning() {
+    return document.visibilityState === 'visible' && document.hasFocus();
   }
 
   private setCameraMode(mode: CameraMode) {
@@ -280,8 +330,9 @@ export class FarmScene extends Phaser.Scene {
     const eastRoad = y >= 43 && y <= 44 && x >= 29 && x <= 104;
     const southRoad = x >= 61 && x <= 62 && y >= 44 && y <= 82;
     const storageTurn = y >= 81 && y <= 82 && x >= 61 && x <= 67;
+    const shippingTurn = y >= 77 && y <= 78 && x >= 62 && x <= 67;
 
-    return houseToFields || fieldConnector || eastRoad || southRoad || storageTurn;
+    return houseToFields || fieldConnector || eastRoad || southRoad || storageTurn || shippingTurn;
   }
 
   private createBoundaryFences() {
@@ -300,6 +351,7 @@ export class FarmScene extends Phaser.Scene {
     this.createHouse();
     this.createCowPen();
     this.createStorage();
+    this.createShippingBin();
   }
 
   private createHouse() {
@@ -381,6 +433,21 @@ export class FarmScene extends Phaser.Scene {
     this.addCollisionRect(left * TILE_SIZE, (top - 1) * TILE_SIZE, widthTiles * TILE_SIZE, (heightTiles + 1) * TILE_SIZE);
   }
 
+  private createShippingBin() {
+    const { tileX, tileY, widthTiles, heightTiles } = LANDMARKS.shippingBin;
+    const left = tileX - Math.floor(widthTiles / 2);
+    const top = tileY - Math.floor(heightTiles / 2);
+
+    for (let y = top; y < top + heightTiles; y += 1) {
+      for (let x = left; x < left + widthTiles; x += 1) {
+        this.buildingLayer.putTileAt(this.tileIndex(y === top ? 'house_roof' : 'house_wall'), x, y);
+      }
+    }
+
+    this.buildingLayer.putTileAt(this.tileIndex('house_door'), tileX, top + heightTiles - 1);
+    this.addCollisionRect(left * TILE_SIZE, top * TILE_SIZE, widthTiles * TILE_SIZE, heightTiles * TILE_SIZE);
+  }
+
   private createExplorationProps() {
     for (let i = 0; i < 180; i += 1) {
       const tileX = 5 + ((i * 11) % (WORLD_COLUMNS - 10));
@@ -409,12 +476,14 @@ export class FarmScene extends Phaser.Scene {
     const house = landmarkCenter(LANDMARKS.house);
     const cowPen = landmarkCenter(LANDMARKS.cowPen);
     const storage = landmarkCenter(LANDMARKS.storage);
+    const shippingBin = landmarkCenter(LANDMARKS.shippingBin);
     const protectedAreas = [
       { x: house.x, y: house.y, radius: 13 * TILE_SIZE },
       { x: tileCenter(24), y: tileCenter(42), radius: 9 * TILE_SIZE },
       { x: tileCenter(28), y: tileCenter(72), radius: 9 * TILE_SIZE },
       { x: cowPen.x, y: cowPen.y, radius: 11 * TILE_SIZE },
       { x: storage.x, y: storage.y, radius: 10 * TILE_SIZE },
+      { x: shippingBin.x, y: shippingBin.y, radius: 5 * TILE_SIZE },
     ];
 
     return protectedAreas.some((area) => Phaser.Math.Distance.Between(x, y, area.x, area.y) < area.radius);
@@ -434,16 +503,22 @@ export class FarmScene extends Phaser.Scene {
 
   private tileIndexForField(state: string) {
     if (state === 'Prepared') return this.tileIndex('field_prepared');
-    if (state === 'Planted') return this.tileIndex('field_planted');
     if (state === 'Locked') return this.tileIndex('field_locked');
-    return this.tileIndex('field_harvested');
+    if (state === 'Empty') return this.tileIndex('field_harvested');
+    return this.tileIndex('field_planted');
   }
 
   private readTaskInput() {
+    if (Phaser.Input.Keyboard.JustDown(this.keys.B)) this.buySeed();
     if (Phaser.Input.Keyboard.JustDown(this.keys.ONE)) this.enqueueTask('Prepare Soil');
     if (Phaser.Input.Keyboard.JustDown(this.keys.TWO)) this.enqueueTask('Plant Wheat');
     if (Phaser.Input.Keyboard.JustDown(this.keys.THREE)) this.enqueueTask('Harvest Wheat');
-    if (Phaser.Input.Keyboard.JustDown(this.keys.FOUR)) this.enqueueTask('Milk Cow');
+    if (Phaser.Input.Keyboard.JustDown(this.keys.FOUR) || Phaser.Input.Keyboard.JustDown(this.keys.FIVE)) this.enqueueTask('Deliver To Shipping Bin');
+  }
+
+  private buySeed() {
+    const bought = this.economy.buySeed();
+    this.publishState(bought ? `Seed bought for ${WHEAT_SEED_COST} coins.` : 'Not enough coins to buy seeds.');
   }
 
   private panFreeCamera(deltaSeconds: number) {
@@ -476,7 +551,7 @@ export class FarmScene extends Phaser.Scene {
       this.maya.playIdle();
       const task = this.activeTravel.task;
       this.activeTravel = null;
-      this.startTaskAnimation(task);
+      this.startTaskWork(task);
       return;
     }
 
@@ -494,6 +569,24 @@ export class FarmScene extends Phaser.Scene {
     this.animationState = 'walk';
     this.maya.playWalkToward(vector.x, vector.y);
     this.publishState();
+  }
+
+  private updateActiveWork(deltaSeconds: number) {
+    if (!this.activeWork) return;
+
+    this.activeWork.elapsed += deltaSeconds;
+    this.publishState();
+
+    if (this.activeWork.elapsed < this.activeWork.duration) return;
+
+    const task = this.activeWork.task;
+    this.activeWork = null;
+    const message = this.applyTask(task);
+    this.redrawFields();
+    const nextTask = this.tasks.completeCurrent();
+    this.setMayaAnimation('idle');
+    this.publishState(message);
+    if (nextTask) this.beginTaskTravel(nextTask);
   }
 
   private collidesAt(x: number, y: number) {
@@ -515,10 +608,10 @@ export class FarmScene extends Phaser.Scene {
     const field = this.fields.getFieldAt(tileX, tileY) ?? this.fields.getFirstUnlockedField();
     if (!field) return;
 
-    if (field.state === 'Harvested') this.enqueueTask('Prepare Soil');
+    if (field.state === 'Empty') this.enqueueTask('Prepare Soil');
     else if (field.state === 'Prepared') this.enqueueTask('Plant Wheat');
-    else if (field.state === 'Planted') this.enqueueTask('Harvest Wheat');
-    else this.publishState('That field is locked.');
+    else if (field.state === 'Ready To Harvest') this.enqueueTask('Harvest Wheat');
+    else this.publishState('That field is still growing.');
   }
 
   private enqueueTask(task: TaskType) {
@@ -528,6 +621,7 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private beginTaskTravel(task: TaskType) {
+    this.activeWork = null;
     this.activeTravel = {
       task,
       ...this.getTaskDestination(task),
@@ -539,8 +633,8 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private getTaskDestination(task: TaskType): Omit<TravelTask, 'task'> {
-    if (task === 'Milk Cow') {
-      return { targetX: tileCenter(LANDMARKS.cowPen.tileX - 3), targetY: tileCenter(LANDMARKS.cowPen.tileY + 4) };
+    if (task === 'Deliver To Shipping Bin') {
+      return { targetX: tileCenter(LANDMARKS.shippingBin.tileX), targetY: tileCenter(LANDMARKS.shippingBin.tileY + 2) };
     }
 
     const field = this.getPreferredFieldForTask(task);
@@ -549,35 +643,28 @@ export class FarmScene extends Phaser.Scene {
 
   private getPreferredFieldForTask(task: TaskType) {
     if (task === 'Prepare Soil') {
-      return this.fields.allFields.find((field) => field.state === 'Harvested') ?? this.fields.getFirstUnlockedField() ?? this.fields.allFields[0];
+      return this.fields.getFirstFieldWithState(['Empty']) ?? this.fields.getFirstUnlockedField() ?? this.fields.allFields[0];
     }
 
     if (task === 'Plant Wheat') {
-      return this.fields.allFields.find((field) => field.state === 'Prepared') ?? this.fields.getFirstUnlockedField() ?? this.fields.allFields[0];
+      return this.fields.getFirstFieldWithState(['Prepared']) ?? this.fields.getFirstUnlockedField() ?? this.fields.allFields[0];
     }
 
-    return this.fields.allFields.find((field) => field.state === 'Planted') ?? this.fields.getFirstUnlockedField() ?? this.fields.allFields[0];
+    return this.fields.getFirstFieldWithState(['Ready To Harvest']) ?? this.fields.getFirstUnlockedField() ?? this.fields.allFields[0];
   }
 
-  private startTaskAnimation(task: TaskType) {
+  private startTaskWork(task: TaskType) {
     const animation: Record<TaskType, AnimationState> = {
       'Prepare Soil': 'prepare soil',
       'Plant Wheat': 'plant',
       'Harvest Wheat': 'harvest',
-      'Milk Cow': 'milk cow',
+      'Deliver To Shipping Bin': 'deliver',
     };
 
     this.setCameraMode('free');
     this.setMayaAnimation(animation[task]);
-
-    this.time.delayedCall(TASK_DURATION, () => {
-      const message = this.applyTask(task);
-      this.redrawFields();
-      const nextTask = this.tasks.completeCurrent();
-      this.setMayaAnimation('idle');
-      this.publishState(message);
-      if (nextTask) this.time.delayedCall(120, () => this.beginTaskTravel(nextTask));
-    });
+    this.activeWork = { task, elapsed: 0, duration: TASK_DURATION };
+    this.publishState(`${task} in progress.`);
   }
 
   private applyTask(task: TaskType) {
@@ -588,24 +675,25 @@ export class FarmScene extends Phaser.Scene {
     const fieldY = field?.tileY ?? tileY;
 
     if (task === 'Prepare Soil') {
-      return this.fields.prepare(fieldX, fieldY) ? 'Field prepared.' : 'No harvested field is available.';
+      return this.fields.prepare(fieldX, fieldY) ? 'Field prepared.' : 'No empty field is available.';
     }
 
     if (task === 'Plant Wheat') {
-      if (!this.economy.useSeed()) return 'No seeds available.';
-      if (this.fields.plant(fieldX, fieldY)) return 'Wheat planted.';
+      if (!this.economy.useSeed()) return 'No seeds available. Buy wheat seeds first.';
+      if (this.fields.plant(fieldX, fieldY)) return 'Wheat planted. Wait for it to grow.';
       this.economy.inventory.seeds += 1;
       return 'No prepared field is available.';
     }
 
     if (task === 'Harvest Wheat') {
-      if (!this.fields.harvest(fieldX, fieldY)) return 'No planted field is available.';
-      this.economy.addWheat(3);
-      return 'Wheat harvested.';
+      if (!this.fields.harvest(fieldX, fieldY)) return 'No wheat is ready to harvest.';
+      this.economy.addWheat(WHEAT_HARVEST_YIELD);
+      return `${WHEAT_HARVEST_YIELD} wheat harvested.`;
     }
 
-    this.economy.addMilk(1);
-    return 'Cow milked.';
+    const sale = this.economy.sellAllWheat();
+    if (sale.quantity === 0) return 'No wheat to deliver.';
+    return `Sold ${sale.quantity} wheat at ${sale.unitPrice} coins each. Earned ${sale.totalEarned} coins.`;
   }
 
   private setMayaAnimation(state: AnimationState) {
@@ -614,7 +702,34 @@ export class FarmScene extends Phaser.Scene {
     else if (state !== 'walk') this.maya.playTaskState(state);
   }
 
+  private loadGame() {
+    try {
+      const raw = window.localStorage.getItem(SAVE_KEY);
+      if (!raw) return;
+      const state = JSON.parse(raw) as Partial<SaveState>;
+      this.economy.load(state.economy);
+      this.fields.load(state.fields);
+      this.tasks.load(state.tasks);
+      this.clock.load(state.clock);
+    } catch {
+      window.localStorage.removeItem(SAVE_KEY);
+    }
+  }
+
+  private saveGame() {
+    const state: SaveState = {
+      economy: this.economy.serialize(),
+      fields: this.fields.serialize(),
+      tasks: this.tasks.serialize(),
+      clock: this.clock.snapshot,
+    };
+    window.localStorage.setItem(SAVE_KEY, JSON.stringify(state));
+  }
+
   private publishState(notification?: string) {
+    if (!this.maya) return;
+
+    this.saveGame();
     emitGameEvent('state', {
       economy: { ...this.economy.economy },
       inventory: { ...this.economy.inventory },
@@ -624,6 +739,14 @@ export class FarmScene extends Phaser.Scene {
       animationState: this.animationState,
       cameraMode: this.cameraMode,
       maya: this.maya.getSnapshot(),
+      clock: this.clock.snapshot,
+      taskProgress: {
+        task: this.activeWork?.task ?? null,
+        progress: this.activeWork ? Phaser.Math.Clamp(this.activeWork.elapsed / this.activeWork.duration, 0, 1) : 0,
+      },
+      lastSale: this.economy.lastSale,
+      wheatSeedCost: WHEAT_SEED_COST,
+      wheatPrice: WHEAT_PRICE,
     });
 
     if (notification) emitGameEvent('notification', notification);
