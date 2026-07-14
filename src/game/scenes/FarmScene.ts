@@ -52,6 +52,12 @@ interface WorkerRuntime {
   animationState: AnimationState;
 }
 
+const FIELD_ZONES = [
+  { id: 1, points: [[280, 250], [480, 218], [620, 286], [420, 345]] },
+  { id: 2, points: [[0, 296], [205, 246], [318, 292], [105, 362]] },
+  { id: 3, points: [[185, 352], [425, 310], [650, 394], [350, 536]] },
+] as const;
+
 export class FarmScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
@@ -70,7 +76,7 @@ export class FarmScene extends Phaser.Scene {
   }
 
   preload() {
-    this.load.image('farm-vertical-slice', './assets/world/farm-vertical-slice.png');
+    this.load.image('farm-vertical-slice', './assets/world/farm-vertical-slice.webp');
   }
 
   create() {
@@ -245,24 +251,37 @@ export class FarmScene extends Phaser.Scene {
 
   private redrawFields() {
     this.fieldLayer.clear();
-
-    [
-      { id: 1, x: 6, y: 5 },
-      { id: 2, x: 8, y: 5 },
-    ].forEach(({ x, y }) => {
-      const field = this.fields.getFieldAt(x, y);
-      const color = field?.state === 'Prepared' ? 0x704422 : field?.state === 'Planted' ? 0x83b93e : field?.state === 'Locked' ? 0x585858 : 0x9c6a32;
-      const [screenX, screenY] = this.isoToScreen(x, y);
-      this.fieldLayer.fillStyle(color, field?.state === 'Locked' ? 0.16 : 0.10);
-      this.fieldLayer.lineStyle(2, field?.state === 'Locked' ? 0xb9b0a2 : 0xffdc72, 0.72);
-      this.fieldLayer.beginPath()
-        .moveTo(screenX, screenY - ISO_HALF_HEIGHT)
-        .lineTo(screenX + ISO_HALF_WIDTH, screenY)
-        .lineTo(screenX, screenY + ISO_HALF_HEIGHT)
-        .lineTo(screenX - ISO_HALF_WIDTH, screenY)
-        .closePath();
-      this.fieldLayer.fillPath().strokePath();
+    FIELD_ZONES.forEach((zone) => {
+      const field = this.fields.getFieldById(zone.id);
+      if (!field) return;
+      const polygon = new Phaser.Geom.Polygon(zone.points.map(([x, y]) => ({ x, y })));
+      const color = field.state === 'Prepared' ? 0x4b2d18 : field.state === 'Planted' ? 0x8a6a31 : field.state === 'Growing' ? 0x4f8d35 : field.state === 'Mature' ? 0xd8a72d : field.state === 'Locked' ? 0x30352e : 0x6f4c2d;
+      this.fieldLayer.fillStyle(color, field.state === 'Raw' ? 0.04 : field.state === 'Locked' ? 0.24 : 0.34);
+      this.fieldLayer.lineStyle(field.state === 'Locked' ? 1 : 2, field.state === 'Locked' ? 0x9b998e : 0xffd86b, field.state === 'Locked' ? 0.35 : 0.72);
+      this.fieldLayer.fillPoints(polygon.points, true).strokePoints(polygon.points, true);
+      this.drawFieldState(polygon, field.state);
     });
+  }
+
+  private drawFieldState(polygon: Phaser.Geom.Polygon, state: string) {
+    if (state === 'Raw' || state === 'Locked') return;
+    const bounds = Phaser.Geom.Polygon.GetAABB(polygon);
+    for (let y = bounds.top + 12; y < bounds.bottom - 8; y += 13) {
+      for (let x = bounds.left + 12; x < bounds.right - 8; x += 16) {
+        if (!Phaser.Geom.Polygon.Contains(polygon, x, y)) continue;
+        if (state === 'Prepared') {
+          this.fieldLayer.lineStyle(2, 0x29170f, 0.52).lineBetween(x - 8, y + 4, x + 8, y - 4);
+        } else if (state === 'Planted') {
+          this.fieldLayer.fillStyle(0xd7b25b, 0.76).fillCircle(x, y, 1.5);
+        } else if (state === 'Growing') {
+          this.fieldLayer.lineStyle(2, 0x75ad42, 0.84).lineBetween(x, y + 4, x, y - 5);
+          this.fieldLayer.lineStyle(1, 0xa6cf62, 0.7).lineBetween(x, y - 1, x + 4, y - 4);
+        } else if (state === 'Mature') {
+          this.fieldLayer.lineStyle(2, 0xd8aa36, 0.92).lineBetween(x, y + 5, x, y - 7);
+          this.fieldLayer.fillStyle(0xf0c552, 0.9).fillCircle(x, y - 8, 2);
+        }
+      }
+    }
   }
 
   private tileIndexForField(state: string) {
@@ -317,7 +336,7 @@ export class FarmScene extends Phaser.Scene {
 
     const task = this.taskForFieldState(field.state);
     if (!task) {
-      this.publishState('That field is locked.');
+      this.publishState(this.fieldStateMessage(field.state));
       return;
     }
 
@@ -330,8 +349,8 @@ export class FarmScene extends Phaser.Scene {
       return;
     }
 
-    const [tileX, tileY] = this.screenToIso(pointer.worldX, pointer.worldY);
-    const field = this.fields.getFieldAt(tileX, tileY);
+    const zone = FIELD_ZONES.find(({ points }) => Phaser.Geom.Polygon.Contains(new Phaser.Geom.Polygon(points.map(([x, y]) => ({ x, y }))), pointer.worldX, pointer.worldY));
+    const field = zone ? this.fields.getFieldById(zone.id) : null;
 
     if (!field) {
       return;
@@ -339,7 +358,7 @@ export class FarmScene extends Phaser.Scene {
 
     const task = this.taskForFieldState(field.state);
     if (!task) {
-      this.publishState('That field is locked.');
+      this.publishState(this.fieldStateMessage(field.state));
       return;
     }
 
@@ -347,10 +366,17 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private taskForFieldState(state: string): TaskType | null {
-    if (state === 'Harvested') return 'Prepare Soil';
+    if (state === 'Raw') return 'Prepare Soil';
     if (state === 'Prepared') return 'Plant Wheat';
-    if (state === 'Planted') return 'Harvest Wheat';
+    if (state === 'Mature') return 'Harvest Wheat';
     return null;
+  }
+
+  private fieldStateMessage(state: string) {
+    if (state === 'Planted') return 'Sementes plantadas. Encerre o dia para iniciar o crescimento.';
+    if (state === 'Growing') return 'O trigo ainda está crescendo. Avance mais um dia.';
+    if (state === 'Locked') return 'Este campo ainda está bloqueado.';
+    return 'Nenhuma ação disponível para este campo.';
   }
 
   private targetForTask(worker: WorkerRuntime, task: TaskType) {
@@ -360,7 +386,7 @@ export class FarmScene extends Phaser.Scene {
     }
 
     if (task === 'Prepare Soil') {
-      return this.fields.getFirstFieldWithState('Harvested') ?? this.lastPlannedTarget(worker);
+      return this.fields.getFirstFieldWithState('Raw') ?? this.lastPlannedTarget(worker);
     }
 
     if (task === 'Plant Wheat') {
@@ -368,7 +394,7 @@ export class FarmScene extends Phaser.Scene {
     }
 
     if (task === 'Harvest Wheat') {
-      return this.fields.getFirstFieldWithState('Planted') ?? this.lastPlannedTarget(worker);
+      return this.fields.getFirstFieldWithState('Mature') ?? this.lastPlannedTarget(worker);
     }
 
     return { tileX: worker.tileX, tileY: worker.tileY };
@@ -470,20 +496,20 @@ export class FarmScene extends Phaser.Scene {
 
   private applyTask(task: TaskCommand) {
     if (task.type === 'Prepare Soil') {
-      return this.fields.prepare(task.targetX, task.targetY) ? 'Field prepared.' : 'No harvested field is available.';
+      return this.fields.prepare(task.targetX, task.targetY) ? 'Solo preparado.' : 'Nenhum campo bruto disponível.';
     }
 
     if (task.type === 'Plant Wheat') {
       if (!this.economy.useSeed()) return 'No seeds available.';
-      if (this.fields.plant(task.targetX, task.targetY)) return 'Wheat planted.';
+      if (this.fields.plant(task.targetX, task.targetY)) return 'Trigo semeado. Avance o dia para crescer.';
       this.economy.inventory.seeds += 1;
-      return 'No prepared field is available.';
+      return 'Nenhum campo preparado disponível.';
     }
 
     if (task.type === 'Harvest Wheat') {
-      if (!this.fields.harvest(task.targetX, task.targetY)) return 'No planted field is available.';
+      if (!this.fields.harvest(task.targetX, task.targetY)) return 'Nenhum trigo maduro disponível.';
       this.economy.addWheat(3);
-      return 'Wheat harvested.';
+      return 'Trigo colhido; o campo voltou ao solo bruto.';
     }
 
     this.economy.addMilk(1);
@@ -513,7 +539,12 @@ export class FarmScene extends Phaser.Scene {
 
   private sellProduct(product: 'wheat' | 'milk') { this.publishState(this.economy.sell(product)); }
   private buySeeds() { this.publishState(this.economy.buySeeds()); }
-  private nextDay() { this.publishState(this.economy.nextDay()); }
+  private nextDay() {
+    const economyMessage = this.economy.nextDay();
+    const grew = this.fields.advanceDay();
+    this.redrawFields();
+    this.publishState(grew ? `${economyMessage} A plantação avançou um estágio.` : economyMessage);
+  }
   private setRole(role: GameRole) { this.role = role; this.publishState(role === 'admin' ? 'Modo administrador ativado.' : 'Modo jogador ativado.'); }
   private applyAdminEvent(type: AdminEventType) {
     if (this.role !== 'admin') { this.publishState('Somente o administrador pode criar eventos.'); return; }

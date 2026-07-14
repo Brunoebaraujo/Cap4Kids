@@ -1,7 +1,7 @@
 export const TILE_SIZE = 32;
 
 export type Direction = 'down' | 'up' | 'left' | 'right';
-export type FieldState = 'Harvested' | 'Prepared' | 'Planted' | 'Locked';
+export type FieldState = 'Raw' | 'Prepared' | 'Planted' | 'Growing' | 'Mature' | 'Locked';
 export type TaskType = 'Prepare Soil' | 'Plant Wheat' | 'Harvest Wheat' | 'Milk Cow';
 export type AnimationState = 'idle' | 'walk' | 'prepare soil' | 'plant' | 'harvest' | 'milk cow';
 export type WorkerStatus = 'Idle' | 'Busy' | 'Moving';

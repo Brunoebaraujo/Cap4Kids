@@ -65,8 +65,9 @@ const initialSnapshot: GameSnapshot = {
   currentTask: null,
   taskQueue: [],
   fields: [
-    { id: 1, state: 'Harvested' },
+    { id: 1, state: 'Raw' },
     { id: 2, state: 'Locked' },
+    { id: 3, state: 'Locked' },
   ],
   animationState: 'idle',
   role: 'player',
