@@ -1,102 +1,92 @@
 import { useEffect, useRef, useState } from 'react';
-import mayaPortrait from './assets/characters/maya/portraits/maya-portrait.png';
+import type Phaser from 'phaser';
 import { createGame } from './game/createGame';
 import { gameEvents } from './game/eventBus';
-import type { CameraMode, GameSnapshot, TaskType } from './game/types';
-
-const taskLabels: Record<TaskType, string> = {
-  'Prepare Soil': 'Preparar Solo',
-  'Plant Wheat': 'Plantar Trigo',
-  'Harvest Wheat': 'Colher Trigo',
-  'Deliver To Shipping Bin': 'Entregar no Shipping Bin',
-};
-
-const taskKeys: Record<TaskType, string> = {
-  'Prepare Soil': '1',
-  'Plant Wheat': '2',
-  'Harvest Wheat': '3',
-  'Deliver To Shipping Bin': '4',
-};
-
-const cameraLabels: Record<CameraMode, string> = {
-  free: 'Livre',
-  followMaya: 'Seguindo Maya',
-};
+import type { AdminEventType, GameRole, GameSnapshot, TaskType } from './game/types';
 
 const initialSnapshot: GameSnapshot = {
   economy: {
-    coins: 0,
-    debt: 0,
-    dailyHouseholdCost: 0,
-    profitLoss: 0,
+    coins: 40,
+    debt: 250,
+    dailyHouseholdCost: 8,
+    inflationRate: 0.02,
+    wheatPrice: 6,
+    milkPrice: 9,
+    wealthCreated: 0,
+    day: 1,
   },
   inventory: {
-    seeds: 0,
+    seeds: 4,
     wheat: 0,
     milk: 0,
   },
+  selectedWorkerId: 'maya',
+  selectedWorker: {
+    id: 'maya',
+    name: 'Maya',
+    position: {
+      x: 4,
+      y: 6,
+    },
+    status: 'Idle',
+    currentTask: null,
+    taskQueue: [],
+    animationState: 'idle',
+    isSelected: true,
+  },
+  workers: [
+    {
+      id: 'maya',
+      name: 'Maya',
+      position: {
+        x: 4,
+        y: 6,
+      },
+      status: 'Idle',
+      currentTask: null,
+      taskQueue: [],
+      animationState: 'idle',
+      isSelected: true,
+    },
+    {
+      id: 'worker-1',
+      name: 'Worker 1',
+      position: {
+        x: 10,
+        y: 6,
+      },
+      status: 'Idle',
+      currentTask: null,
+      taskQueue: [],
+      animationState: 'idle',
+      isSelected: false,
+    },
+  ],
   currentTask: null,
   taskQueue: [],
-  fields: [],
+  fields: [
+    { id: 1, state: 'Harvested' },
+    { id: 2, state: 'Locked' },
+  ],
   animationState: 'idle',
-  cameraMode: 'free',
-  maya: {
-    animation: 'idle_down',
-    direction: 'down',
-    x: 0,
-    y: 0,
-    frameWidth: 32,
-    frameHeight: 32,
-    state: 'idle',
-  },
-  clock: {
-    day: 1,
-    minuteOfDay: 6 * 60,
-    dailyCostCountdownSeconds: 180,
-    isRunning: true,
-  },
-  taskProgress: {
-    task: null,
-    progress: 0,
-  },
-  lastSale: null,
-  wheatSeedCost: 2,
-  wheatPrice: 3,
+  role: 'player',
+  rivals: [
+    { id: 'olive', name: 'Fazenda Oliveira', coins: 52, marketShare: 34, price: 6, color: '#e38b4d' },
+    { id: 'sun', name: 'Sítio do Sol', coins: 47, marketShare: 29, price: 7, color: '#f4cf55' },
+  ],
+  events: [],
 };
 
-function dispatchKey(key: string) {
-  const upper = key.toUpperCase();
-  const code = /^\d$/.test(key) ? `Digit${key}` : `Key${upper}`;
-  window.dispatchEvent(new KeyboardEvent('keydown', { key, code, bubbles: true }));
-  window.dispatchEvent(new KeyboardEvent('keyup', { key, code, bubbles: true }));
-}
-
-function dispatchTaskKey(task: TaskType) {
-  dispatchKey(taskKeys[task]);
-}
-
-function formatTask(task: TaskType | null) {
-  return task ? taskLabels[task] : 'Livre';
-}
-
-function formatTime(minuteOfDay: number) {
-  const hours = Math.floor(minuteOfDay / 60) % 24;
-  const minutes = minuteOfDay % 60;
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-}
-
-function formatSigned(value: number) {
-  return value > 0 ? `+${value}` : String(value);
-}
-
-export default function App() {
+function App() {
   const gameRootRef = useRef<HTMLDivElement | null>(null);
-  const gameRef = useRef<ReturnType<typeof createGame> | null>(null);
-  const [snapshot, setSnapshot] = useState<GameSnapshot>(initialSnapshot);
-  const [notification, setNotification] = useState('Bem-vindo a Capitalism 4 Kids.');
+  const gameRef = useRef<Phaser.Game | null>(null);
+  const [snapshot, setSnapshot] = useState(initialSnapshot);
+  const [notification, setNotification] = useState('Use arrows or WASD to move tile-by-tile.');
 
   useEffect(() => {
-    if (!gameRootRef.current || gameRef.current) return;
+    if (!gameRootRef.current || gameRef.current) {
+      return;
+    }
 
     gameRef.current = createGame(gameRootRef.current);
 
@@ -106,19 +96,26 @@ export default function App() {
     };
   }, []);
 
-  useEffect(() => {
-    const preventGameKeyScroll = (event: KeyboardEvent) => {
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(event.code)) {
-        event.preventDefault();
-      }
-    };
+  const requestTask = (task: TaskType) => {
+    gameEvents.emit('task', task);
+  };
 
-    window.addEventListener('keydown', preventGameKeyScroll);
-    return () => window.removeEventListener('keydown', preventGameKeyScroll);
-  }, []);
+  const selectWorker = (workerId: string) => {
+    gameEvents.emit('selectWorker', workerId);
+  };
+
+  const findWorker = (workerId: string) => {
+    gameEvents.emit('findWorker', workerId);
+  };
+
+  const sell = (product: 'wheat' | 'milk') => gameEvents.emit('sell', product);
+  const buySeeds = () => gameEvents.emit('buySeeds');
+  const nextDay = () => gameEvents.emit('nextDay');
+  const setRole = (role: GameRole) => gameEvents.emit('role', role);
+  const triggerEvent = (event: AdminEventType) => gameEvents.emit('adminEvent', event);
 
   useEffect(() => {
-    const handleState = (state: GameSnapshot) => setSnapshot(state);
+    const handleState = (nextSnapshot: GameSnapshot) => setSnapshot(nextSnapshot);
     const handleNotification = (message: string) => setNotification(message);
 
     gameEvents.on('state', handleState);
@@ -130,170 +127,155 @@ export default function App() {
     };
   }, []);
 
-  const queuedTasks = snapshot.taskQueue.length
-    ? snapshot.taskQueue.map((task) => taskLabels[task]).join(' -> ')
-    : 'Vazia';
-  const firstField = snapshot.fields[0];
-  const taskProgressPercent = Math.round(snapshot.taskProgress.progress * 100);
-
   return (
     <main className="app-shell">
-      <div ref={gameRootRef} className="world-layer" aria-label="Mundo da fazenda" />
-
-      <section className="top-panel" aria-label="Painel principal">
-        <div className="maya-profile">
-          <img src={mayaPortrait} alt="Retrato da Maya" className="maya-portrait" />
-          <div>
-            <p className="eyebrow">Capitalism 4 Kids</p>
-            <h1>Fazenda da Maya</h1>
-          </div>
-        </div>
-
-        <div className="hud-grid" aria-label="Resumo da economia">
-          <div className="hud-card">
-            <span>Moedas</span>
-            <strong>{snapshot.economy.coins}</strong>
-          </div>
-          <div className="hud-card">
-            <span>Dívida</span>
-            <strong>{snapshot.economy.debt}</strong>
-          </div>
-          <div className="hud-card">
-            <span>Custo diário</span>
-            <strong>{snapshot.economy.dailyHouseholdCost}</strong>
-          </div>
-          <div className="hud-card">
-            <span>Lucro/Prejuízo</span>
-            <strong>{formatSigned(snapshot.economy.profitLoss)}</strong>
-          </div>
-          <div className="hud-card">
-            <span>Dia</span>
-            <strong>{snapshot.clock.day}</strong>
-          </div>
-          <div className="hud-card">
-            <span>Hora</span>
-            <strong>{formatTime(snapshot.clock.minuteOfDay)}</strong>
-          </div>
-        </div>
+      <section className="game-panel" aria-label="Capitalism 4 Kids farm world">
+        <div ref={gameRootRef} className="game-root" />
       </section>
 
-      <aside className="side-panel left-panel" aria-label="Controles da fazenda">
-        <div className="panel-block">
-          <h2>Ações</h2>
-          <div className="action-grid">
-            <button type="button" onClick={() => dispatchKey('b')}>
-              Comprar Semente ({snapshot.wheatSeedCost})
-            </button>
-            {(Object.keys(taskLabels) as TaskType[]).map((task) => (
-              <button key={task} type="button" onClick={() => dispatchTaskKey(task)}>
-                {taskLabels[task]}
-              </button>
-            ))}
+      <aside className="hud" aria-label="Farm status">
+        <header className="hud-header">
+          <p className="eyebrow">Capitalism 4 Kids · Dia {snapshot.economy.day}</p>
+          <h1>Vale das Oportunidades</h1>
+          <div className="role-switch" role="group" aria-label="Modo de acesso">
+            <button className={snapshot.role === 'player' ? 'active' : ''} onClick={() => setRole('player')}>Jogador</button>
+            <button className={snapshot.role === 'admin' ? 'active' : ''} onClick={() => setRole('admin')}>Admin</button>
           </div>
-        </div>
+        </header>
 
-        <div className="panel-block">
-          <h2>Tarefa atual</h2>
-          <p className="status-line">{formatTask(snapshot.currentTask)}</p>
-          <div className="progress-shell" aria-label="Progresso da tarefa">
-            <div className="progress-fill" style={{ width: `${taskProgressPercent}%` }} />
-          </div>
-          <p className="tiny-line">{snapshot.taskProgress.task ? `${taskProgressPercent}%` : 'Sem tarefa em progresso'}</p>
-        </div>
-
-        <div className="panel-block">
-          <h2>Fila</h2>
-          <p className="status-line">{queuedTasks}</p>
-        </div>
-
-        <div className="panel-block debug-panel">
-          <h2>Debug</h2>
-          <dl className="debug-list">
+        <section className="hud-section">
+          <h2>Economy</h2>
+          <dl className="stat-grid">
             <div>
-              <dt>Tarefa</dt>
-              <dd>{formatTask(snapshot.currentTask)}</dd>
+              <dt>Coins</dt>
+              <dd>{snapshot.economy.coins}</dd>
             </div>
             <div>
-              <dt>Camera</dt>
-              <dd>{cameraLabels[snapshot.cameraMode]}</dd>
+              <dt>Debt</dt>
+              <dd>{snapshot.economy.debt}</dd>
             </div>
             <div>
-              <dt>Dia</dt>
-              <dd>{snapshot.clock.day}</dd>
-            </div>
-            <div>
-              <dt>Hora</dt>
-              <dd>{formatTime(snapshot.clock.minuteOfDay)}</dd>
-            </div>
-            <div>
-              <dt>Campo</dt>
-              <dd>{firstField?.state ?? 'Sem campo'}</dd>
-            </div>
-            <div>
-              <dt>Maya</dt>
-              <dd>{snapshot.maya.animation}</dd>
+              <dt>Custo diário</dt>
+              <dd>{snapshot.economy.dailyHouseholdCost}</dd>
             </div>
           </dl>
-        </div>
-      </aside>
+          <div className="economy-strip">
+            <span>Inflação <strong>{(snapshot.economy.inflationRate * 100).toFixed(1)}%</strong></span>
+            <span>Riqueza criada <strong>{snapshot.economy.wealthCreated}</strong></span>
+          </div>
+          <button className="primary-action" onClick={nextDay}>Encerrar dia e pagar custos</button>
+        </section>
 
-      <aside className="side-panel right-panel" aria-label="Inventário">
-        <div className="panel-block">
-          <h2>Tempo</h2>
-          <p className="status-line">{snapshot.clock.isRunning ? 'Tempo ativo' : 'Tempo pausado'}</p>
-          <p className="tiny-line">Próximo custo em {snapshot.clock.dailyCostCountdownSeconds}s ativos</p>
-        </div>
+        <section className="hud-section market-section">
+          <h2>Mercado local</h2>
+          <div className="market-grid">
+            <button onClick={() => sell('wheat')}><span>Trigo</span><strong>{snapshot.economy.wheatPrice} moedas</strong><small>Vender estoque</small></button>
+            <button onClick={() => sell('milk')}><span>Leite</span><strong>{snapshot.economy.milkPrice} moedas</strong><small>Vender estoque</small></button>
+            <button onClick={buySeeds}><span>Sementes</span><strong>Preço variável</strong><small>Comprar 2</small></button>
+          </div>
+          <p className="lesson">Preços sinalizam escassez. A inflação reduz o poder de compra; concorrentes reagem ao mercado a cada dia.</p>
+        </section>
 
-        <div className="panel-block">
-          <h2>Inventário</h2>
-          <dl className="inventory-list">
+        <section className="hud-section">
+          <h2>Concorrência · sala com 3 fazendas</h2>
+          <div className="leaderboard">
+            <div><i style={{ background: '#62c58b' }} /><span>Sua fazenda</span><strong>{snapshot.economy.coins} moedas</strong></div>
+            {snapshot.rivals.map((rival) => <div key={rival.id}><i style={{ background: rival.color }} /><span>{rival.name}</span><strong>{rival.coins} · preço {rival.price}</strong></div>)}
+          </div>
+          <small className="prototype-note">Rivais simulados nesta versão; o servidor autoritativo substituirá esta camada.</small>
+        </section>
+
+        {snapshot.role === 'admin' && <section className="hud-section admin-panel">
+          <p className="eyebrow">Console divino</p>
+          <h2>Criar evento para toda a sala</h2>
+          <div className="admin-actions">
+            {([['drought', 'Seca'], ['rain', 'Chuva'], ['subsidy', 'Subsídio'], ['inflation', 'Inflação'], ['locusts', 'Gafanhotos']] as [AdminEventType, string][]).map(([type, label]) => <button key={type} onClick={() => triggerEvent(type)}>{label}</button>)}
+          </div>
+          <div className="event-feed">{snapshot.events.length ? snapshot.events.slice(0, 3).map((event) => <p key={event.id}><strong>Dia {event.day}: {event.title}</strong>{event.description}</p>) : <p>Nenhum evento criado.</p>}</div>
+        </section>}
+
+        <section className="hud-section">
+          <h2>Selected Worker</h2>
+          <div className="actions">
+            <button type="button" onClick={() => requestTask('Prepare Soil')}>Prepare Soil</button>
+            <button type="button" onClick={() => requestTask('Plant Wheat')}>Plant Wheat</button>
+            <button type="button" onClick={() => requestTask('Harvest Wheat')}>Harvest Wheat</button>
+            <button type="button" onClick={() => requestTask('Milk Cow')}>Milk Cow</button>
+          </div>
+          <div className="task-line">
+            <span>Selected Worker</span>
+            <strong>{snapshot.selectedWorker.name}</strong>
+          </div>
+          <div className="task-line">
+            <span>Status</span>
+            <strong>{snapshot.selectedWorker.status}</strong>
+          </div>
+          <div className="task-line">
+            <span>Current Task</span>
+            <strong>{snapshot.selectedWorker.currentTask?.type ?? 'Idle'}</strong>
+          </div>
+          <div className="task-line">
+            <span>Queue Length</span>
+            <strong>{snapshot.selectedWorker.taskQueue.length}</strong>
+          </div>
+          <div className="queue">
+            {snapshot.selectedWorker.taskQueue.length > 0
+              ? snapshot.selectedWorker.taskQueue.map((task) => <span key={task.id}>{task.type}</span>)
+              : <span>Queue empty</span>}
+          </div>
+        </section>
+
+        <section className="hud-section">
+          <h2>Workers</h2>
+          <div className="workers-list">
+            {snapshot.workers.map((worker) => (
+              <div key={worker.id} className={worker.isSelected ? 'worker-row worker-row-selected' : 'worker-row'}>
+                <button type="button" className="worker-select" onClick={() => selectWorker(worker.id)}>
+                  <span>{worker.name}</span>
+                  <strong>{worker.status} / Queue {worker.taskQueue.length}</strong>
+                </button>
+                <button type="button" className="find-worker" onClick={() => findWorker(worker.id)}>
+                  Find
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="hud-section">
+          <h2>Inventory</h2>
+          <dl className="inventory">
             <div>
-              <dt>Sementes</dt>
+              <dt>Seeds</dt>
               <dd>{snapshot.inventory.seeds}</dd>
             </div>
             <div>
-              <dt>Trigo</dt>
+              <dt>Wheat</dt>
               <dd>{snapshot.inventory.wheat}</dd>
             </div>
             <div>
-              <dt>Preço trigo</dt>
-              <dd>{snapshot.wheatPrice}</dd>
+              <dt>Milk</dt>
+              <dd>{snapshot.inventory.milk}</dd>
             </div>
           </dl>
-        </div>
+        </section>
 
-        <div className="panel-block">
-          <h2>Venda</h2>
-          <dl className="inventory-list">
-            <div>
-              <dt>Qtd.</dt>
-              <dd>{snapshot.lastSale?.quantity ?? 0}</dd>
-            </div>
-            <div>
-              <dt>Preço</dt>
-              <dd>{snapshot.lastSale?.unitPrice ?? snapshot.wheatPrice}</dd>
-            </div>
-            <div>
-              <dt>Total</dt>
-              <dd>{snapshot.lastSale?.totalEarned ?? 0}</dd>
-            </div>
-          </dl>
-        </div>
-
-        <div className="panel-block">
-          <h2>Campos</h2>
-          <dl className="field-list">
+        <section className="hud-section">
+          <h2>Fields</h2>
+          <div className="fields">
             {snapshot.fields.map((field) => (
-              <div key={field.id}>
-                <dt>Campo {field.id}</dt>
-                <dd>{field.state}</dd>
+              <div key={field.id} className="field-row">
+                <span>Field {field.id}</span>
+                <strong>{field.state}</strong>
               </div>
             ))}
-          </dl>
-        </div>
-      </aside>
+          </div>
+        </section>
 
-      <p className="notification">{notification}</p>
+        <p className="notification">{notification}</p>
+      </aside>
     </main>
   );
 }
+
+export default App;
