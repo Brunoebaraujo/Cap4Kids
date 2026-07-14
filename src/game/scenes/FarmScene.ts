@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { createPixelAssets } from '../assets/createPixelAssets';
+import { FIELD_LAYOUTS, fieldPolygon, fieldWorkPoint } from '../data/fieldLayout';
 import { emitGameEvent, gameEvents } from '../eventBus';
 import { EconomySystem } from '../systems/EconomySystem';
 import { FieldSystem } from '../systems/FieldSystem';
@@ -52,12 +53,6 @@ interface WorkerRuntime {
   animationState: AnimationState;
 }
 
-const FIELD_ZONES = [
-  { id: 1, points: [[280, 250], [480, 218], [620, 286], [420, 345]] },
-  { id: 2, points: [[0, 296], [205, 246], [318, 292], [105, 362]] },
-  { id: 3, points: [[185, 352], [425, 310], [650, 394], [350, 536]] },
-] as const;
-
 export class FarmScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
@@ -66,6 +61,9 @@ export class FarmScene extends Phaser.Scene {
   private nextTaskId = 1;
   private role: GameRole = 'player';
   private skipNextWorldClick = false;
+  private hoveredFieldId: number | null = null;
+  private debugFields = false;
+  private fieldDebugLabels: Phaser.GameObjects.Text[] = [];
 
   private readonly workers = new Map<string, WorkerRuntime>();
   private readonly fields = new FieldSystem();
@@ -86,9 +84,10 @@ export class FarmScene extends Phaser.Scene {
     this.createWorkers();
 
     this.cursors = this.input.keyboard!.createCursorKeys();
-    this.keys = this.input.keyboard!.addKeys('W,A,S,D,SPACE,ONE,TWO,THREE,FOUR') as Record<string, Phaser.Input.Keyboard.Key>;
+    this.keys = this.input.keyboard!.addKeys('W,A,S,D,G,SPACE,ONE,TWO,THREE,FOUR') as Record<string, Phaser.Input.Keyboard.Key>;
 
     this.input.on('pointerup', this.handleWorldClick, this);
+    this.input.on('pointermove', this.handleFieldHover, this);
     gameEvents.on('task', this.enqueueTaskForSelectedWorker, this);
     gameEvents.on('selectWorker', this.selectWorker, this);
     gameEvents.on('findWorker', this.centerCameraOnWorker, this);
@@ -99,6 +98,7 @@ export class FarmScene extends Phaser.Scene {
     gameEvents.on('role', this.setRole, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.input.off('pointerup', this.handleWorldClick, this);
+      this.input.off('pointermove', this.handleFieldHover, this);
       gameEvents.off('task', this.enqueueTaskForSelectedWorker, this);
       gameEvents.off('selectWorker', this.selectWorker, this);
       gameEvents.off('findWorker', this.centerCameraOnWorker, this);
@@ -114,6 +114,11 @@ export class FarmScene extends Phaser.Scene {
   }
 
   update() {
+    if (Phaser.Input.Keyboard.JustDown(this.keys.G)) {
+      this.debugFields = !this.debugFields;
+      this.redrawFields();
+      this.publishState(this.debugFields ? 'Grade de campos ativada.' : 'Grade de campos desativada.');
+    }
     if (Phaser.Input.Keyboard.JustDown(this.keys.ONE)) this.enqueueTaskForSelectedWorker('Prepare Soil');
     if (Phaser.Input.Keyboard.JustDown(this.keys.TWO)) this.enqueueTaskForSelectedWorker('Plant Wheat');
     if (Phaser.Input.Keyboard.JustDown(this.keys.THREE)) this.enqueueTaskForSelectedWorker('Harvest Wheat');
@@ -251,16 +256,32 @@ export class FarmScene extends Phaser.Scene {
 
   private redrawFields() {
     this.fieldLayer.clear();
-    FIELD_ZONES.forEach((zone) => {
-      const field = this.fields.getFieldById(zone.id);
+    this.fieldDebugLabels.forEach((label) => label.destroy());
+    this.fieldDebugLabels = [];
+    FIELD_LAYOUTS.forEach((layout) => {
+      const field = this.fields.getFieldById(layout.id);
       if (!field) return;
-      const polygon = new Phaser.Geom.Polygon(zone.points.map(([x, y]) => ({ x, y })));
+      const polygon = new Phaser.Geom.Polygon(fieldPolygon(layout, VIEW_WIDTH, VIEW_HEIGHT));
+      const isHovered = this.hoveredFieldId === field.id;
       const color = field.state === 'Prepared' ? 0x4b2d18 : field.state === 'Planted' ? 0x8a6a31 : field.state === 'Growing' ? 0x4f8d35 : field.state === 'Mature' ? 0xd8a72d : field.state === 'Locked' ? 0x30352e : 0x6f4c2d;
-      this.fieldLayer.fillStyle(color, field.state === 'Raw' ? 0.04 : field.state === 'Locked' ? 0.24 : 0.34);
-      this.fieldLayer.lineStyle(field.state === 'Locked' ? 1 : 2, field.state === 'Locked' ? 0x9b998e : 0xffd86b, field.state === 'Locked' ? 0.35 : 0.72);
+      const stateAlpha = field.state === 'Raw' ? 0 : field.state === 'Locked' ? 0.05 : 0.34;
+      this.fieldLayer.fillStyle(color, isHovered ? Math.max(stateAlpha, 0.12) : stateAlpha);
+      this.fieldLayer.lineStyle(this.debugFields || isHovered ? 2 : 0, field.state === 'Locked' ? 0xb5b0a3 : 0xffd86b, this.debugFields ? 0.8 : isHovered ? 0.9 : 0);
       this.fieldLayer.fillPoints(polygon.points, true).strokePoints(polygon.points, true);
       this.drawFieldState(polygon, field.state);
+      if (this.debugFields) this.drawFieldDebug(layout, polygon, field.state);
     });
+  }
+
+  private drawFieldDebug(layout: (typeof FIELD_LAYOUTS)[number], polygon: Phaser.Geom.Polygon, state: string) {
+    this.fieldLayer.fillStyle(0x61d6ff, 0.95);
+    polygon.points.forEach((point) => this.fieldLayer.fillCircle(point.x, point.y, 4));
+    const workPoint = fieldWorkPoint(layout, VIEW_WIDTH, VIEW_HEIGHT);
+    this.fieldLayer.lineStyle(2, 0xff5b6e, 1).strokeCircle(workPoint.x, workPoint.y, 7);
+    const label = this.add.text(workPoint.x + 10, workPoint.y - 20, `Campo ${layout.id}\n${state}`, {
+      fontFamily: 'monospace', fontSize: '11px', color: '#ffffff', backgroundColor: '#101820dd', padding: { x: 5, y: 3 },
+    }).setDepth(30);
+    this.fieldDebugLabels.push(label);
   }
 
   private drawFieldState(polygon: Phaser.Geom.Polygon, state: string) {
@@ -349,8 +370,8 @@ export class FarmScene extends Phaser.Scene {
       return;
     }
 
-    const zone = FIELD_ZONES.find(({ points }) => Phaser.Geom.Polygon.Contains(new Phaser.Geom.Polygon(points.map(([x, y]) => ({ x, y }))), pointer.worldX, pointer.worldY));
-    const field = zone ? this.fields.getFieldById(zone.id) : null;
+    const layout = this.fieldLayoutAt(pointer.worldX, pointer.worldY);
+    const field = layout ? this.fields.getFieldById(layout.id) : null;
 
     if (!field) {
       return;
@@ -363,6 +384,18 @@ export class FarmScene extends Phaser.Scene {
     }
 
     this.enqueueTask(this.getSelectedWorker(), task, field.tileX, field.tileY);
+  }
+
+  private handleFieldHover(pointer: Phaser.Input.Pointer) {
+    const fieldId = this.fieldLayoutAt(pointer.worldX, pointer.worldY)?.id ?? null;
+    if (fieldId === this.hoveredFieldId) return;
+    this.hoveredFieldId = fieldId;
+    this.redrawFields();
+    this.game.canvas.style.cursor = fieldId ? 'pointer' : 'default';
+  }
+
+  private fieldLayoutAt(x: number, y: number) {
+    return FIELD_LAYOUTS.find((layout) => Phaser.Geom.Polygon.Contains(new Phaser.Geom.Polygon(fieldPolygon(layout, VIEW_WIDTH, VIEW_HEIGHT)), x, y));
   }
 
   private taskForFieldState(state: string): TaskType | null {
@@ -474,10 +507,13 @@ export class FarmScene extends Phaser.Scene {
       this.publishState();
 
       const distance = Math.max(Math.abs(worker.tileX - tileX), Math.abs(worker.tileY - tileY));
+      const targetField = this.fields.getFieldAt(tileX, tileY);
+      const layout = targetField ? FIELD_LAYOUTS.find((candidate) => candidate.id === targetField.id) : null;
+      const target = layout ? fieldWorkPoint(layout, VIEW_WIDTH, VIEW_HEIGHT) : { x: this.isoToScreen(tileX, tileY)[0], y: this.isoToScreen(tileX, tileY)[1] };
       this.tweens.add({
         targets: worker.sprite,
-        x: this.isoToScreen(tileX, tileY)[0],
-        y: this.isoToScreen(tileX, tileY)[1],
+        x: target.x,
+        y: target.y,
         duration: MOVE_DURATION * Math.max(1, distance),
         ease: 'Linear',
         onUpdate: () => {
