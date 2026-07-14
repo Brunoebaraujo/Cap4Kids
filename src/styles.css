@@ -58,7 +58,7 @@ button:hover {
   border: 3px solid #8a6a35;
   background: #0b120b;
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.42), inset 0 0 0 1px #19140d;
-  image-rendering: pixelated;
+  image-rendering: auto;
 }
 
 .game-root {
@@ -68,7 +68,7 @@ button:hover {
 
 .game-root canvas {
   display: block;
-  image-rendering: pixelated;
+  image-rendering: auto;
   border-radius: 2px;
 }
 

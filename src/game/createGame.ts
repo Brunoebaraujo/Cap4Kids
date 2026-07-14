@@ -7,16 +7,16 @@ export function createGame(parent: HTMLElement) {
     parent,
     width: 960,
     height: 540,
-    pixelArt: true,
+    pixelArt: false,
     backgroundColor: '#172316',
     scale: {
       mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,
     },
     render: {
-      antialias: false,
-      pixelArt: true,
-      roundPixels: true,
+      antialias: true,
+      pixelArt: false,
+      roundPixels: false,
     },
     scene: [FarmScene],
   });
