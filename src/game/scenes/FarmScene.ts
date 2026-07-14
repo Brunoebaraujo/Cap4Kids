@@ -18,6 +18,12 @@ import {
 
 const WORLD_WIDTH = 20;
 const WORLD_HEIGHT = 13;
+const VIEW_WIDTH = 960;
+const VIEW_HEIGHT = 540;
+const ISO_ORIGIN_X = 480;
+const ISO_ORIGIN_Y = 76;
+const ISO_HALF_WIDTH = 28;
+const ISO_HALF_HEIGHT = 14;
 const MOVE_DURATION = 150;
 const TASK_DURATION = 650;
 const MAYA_ID = 'maya';
@@ -61,6 +67,10 @@ export class FarmScene extends Phaser.Scene {
 
   constructor() {
     super('FarmScene');
+  }
+
+  preload() {
+    this.load.image('farm-vertical-slice', './assets/world/farm-vertical-slice.png');
   }
 
   create() {
@@ -139,42 +149,40 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private createWorld() {
-    this.cameras.main.setBackgroundColor('#2f6f43');
-    const ground = this.add.graphics().setDepth(0);
-    for (let y = 0; y < WORLD_HEIGHT; y += 1) {
-      for (let x = 0; x < WORLD_WIDTH; x += 1) {
-        const [screenX, screenY] = this.isoToScreen(x, y);
-        const edge = x === 0 || y === 0 || x === WORLD_WIDTH - 1 || y === WORLD_HEIGHT - 1;
-        const path = y === 7 || (x > 2 && x < 11 && y === 6);
-        this.drawDiamond(ground, screenX, screenY, edge ? 0x8a6439 : path ? 0xb6793c : 0x6fbf4a, 0x426d36);
-      }
-    }
+    this.cameras.main.setBackgroundColor('#172316');
+    this.add.image(VIEW_WIDTH / 2, VIEW_HEIGHT / 2, 'farm-vertical-slice')
+      .setDisplaySize(VIEW_WIDTH, VIEW_HEIGHT)
+      .setDepth(0);
+
+    const vignette = this.add.graphics().setDepth(1);
+    vignette.fillStyle(0x071008, 0.16).fillRect(0, 0, VIEW_WIDTH, 46);
+    vignette.fillStyle(0x071008, 0.12).fillRect(0, VIEW_HEIGHT - 34, VIEW_WIDTH, 34);
     this.fieldLayer = this.add.graphics().setDepth(2);
     this.redrawFields();
 
-    this.add.text(9, 9, 'Click a worker, then click a field. 1-4 queue commands. Space Context.', {
+    this.add.text(16, 14, 'Selecione um trabalhador e clique em um campo.', {
       fontFamily: 'monospace',
       fontSize: '11px',
       color: '#fff8d6',
-      backgroundColor: '#2d241a',
-      padding: { x: 4, y: 3 },
-    }).setDepth(20);
+      backgroundColor: '#151b12cc',
+      padding: { x: 8, y: 5 },
+    }).setDepth(20).setScrollFactor(0);
 
   }
 
   private isoToScreen(tileX: number, tileY: number): [number, number] {
-    return [320 + (tileX - tileY) * 16, 28 + (tileX + tileY) * 8];
+    return [ISO_ORIGIN_X + (tileX - tileY) * ISO_HALF_WIDTH, ISO_ORIGIN_Y + (tileX + tileY) * ISO_HALF_HEIGHT];
   }
 
   private screenToIso(screenX: number, screenY: number): [number, number] {
-    const a = (screenX - 320) / 16;
-    const b = (screenY - 28) / 8;
+    const a = (screenX - ISO_ORIGIN_X) / ISO_HALF_WIDTH;
+    const b = (screenY - ISO_ORIGIN_Y) / ISO_HALF_HEIGHT;
     return [Math.round((a + b) / 2), Math.round((b - a) / 2)];
   }
 
   private drawDiamond(graphics: Phaser.GameObjects.Graphics, x: number, y: number, fill: number, stroke: number) {
     graphics.fillStyle(fill, 1).lineStyle(1, stroke, .5);
-    graphics.beginPath().moveTo(x, y - 8).lineTo(x + 16, y).lineTo(x, y + 8).lineTo(x - 16, y).closePath();
+    graphics.beginPath().moveTo(x, y - ISO_HALF_HEIGHT).lineTo(x + ISO_HALF_WIDTH, y).lineTo(x, y + ISO_HALF_HEIGHT).lineTo(x - ISO_HALF_WIDTH, y).closePath();
     graphics.fillPath().strokePath();
   }
 
@@ -186,7 +194,7 @@ export class FarmScene extends Phaser.Scene {
   private addWorker(id: string, name: string, tileX: number, tileY: number, tint?: number) {
     const [x, y] = this.isoToScreen(tileX, tileY);
     const selectionRing = this.add.graphics().setDepth(8);
-    const sprite = this.add.sprite(x, y, 'maya', 0).setDepth(10).setInteractive({ useHandCursor: true });
+    const sprite = this.add.sprite(x, y, 'maya', 0).setScale(1.45).setDepth(10).setInteractive({ useHandCursor: true });
     const nameLabel = this.add.text(x, y - 28, name, {
       fontFamily: 'monospace',
       fontSize: '10px',
@@ -245,7 +253,15 @@ export class FarmScene extends Phaser.Scene {
       const field = this.fields.getFieldAt(x, y);
       const color = field?.state === 'Prepared' ? 0x704422 : field?.state === 'Planted' ? 0x83b93e : field?.state === 'Locked' ? 0x585858 : 0x9c6a32;
       const [screenX, screenY] = this.isoToScreen(x, y);
-      this.drawDiamond(this.fieldLayer, screenX, screenY, color, 0x3b2719);
+      this.fieldLayer.fillStyle(color, field?.state === 'Locked' ? 0.16 : 0.10);
+      this.fieldLayer.lineStyle(2, field?.state === 'Locked' ? 0xb9b0a2 : 0xffdc72, 0.72);
+      this.fieldLayer.beginPath()
+        .moveTo(screenX, screenY - ISO_HALF_HEIGHT)
+        .lineTo(screenX + ISO_HALF_WIDTH, screenY)
+        .lineTo(screenX, screenY + ISO_HALF_HEIGHT)
+        .lineTo(screenX - ISO_HALF_WIDTH, screenY)
+        .closePath();
+      this.fieldLayer.fillPath().strokePath();
     });
   }
 
@@ -517,9 +533,10 @@ export class FarmScene extends Phaser.Scene {
     const isSelected = worker.id === this.selectedWorkerId;
     worker.selectionRing.clear();
     worker.selectionRing.lineStyle(isSelected ? 3 : 1, isSelected ? 0xfff06a : 0x2f6f43, isSelected ? 1 : 0.35);
-    worker.selectionRing.strokeEllipse(worker.sprite.x, worker.sprite.y + 9, 28, 10);
+    worker.selectionRing.strokeEllipse(worker.sprite.x, worker.sprite.y + 14, 42, 15);
     worker.selectionRing.fillStyle(0xfff06a, isSelected ? 0.18 : 0);
-    worker.selectionRing.fillEllipse(worker.sprite.x, worker.sprite.y + 9, 28, 10);
+    worker.selectionRing.fillEllipse(worker.sprite.x, worker.sprite.y + 14, 42, 15);
+    worker.sprite.setDepth(10 + worker.sprite.y / 1000);
     worker.nameLabel.setColor(isSelected ? '#fff06a' : '#ffffff');
     worker.statusLabel.setText(this.statusText(worker));
 

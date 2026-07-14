@@ -5,10 +5,10 @@ export function createGame(parent: HTMLElement) {
   return new Phaser.Game({
     type: Phaser.AUTO,
     parent,
-    width: 640,
-    height: 416,
+    width: 960,
+    height: 540,
     pixelArt: true,
-    backgroundColor: '#2f6f43',
+    backgroundColor: '#172316',
     scale: {
       mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,

@@ -34,3 +34,15 @@ Current placeholders:
 - Do not swap full-screen images to fake progression.
 - Do not use realistic, painterly, or HD-style assets.
 - Build the world from tilemaps, tilesets, sprites, spritesheets, frame animations, and Phaser game objects.
+# Vertical slice visual target
+
+The approved direction is a premium painterly-realistic 2.5D farming RTS. The first implementation uses a single world plate behind deterministic Phaser interactions. This is transitional: buildings, terrain, crops, vegetation, and props will be extracted into independently depth-sorted assets after the interaction model is validated.
+
+Rules for every production asset:
+
+- Orthographic 2:1 isometric projection.
+- Light from the upper-left; shadows fall lower-right.
+- Natural greens, wheat gold, terracotta, weathered timber, cream plaster.
+- Readable silhouettes before surface detail.
+- Logical collision and interaction data never baked into the artwork.
+- UI remains HTML/CSS; text is never burned into world imagery.

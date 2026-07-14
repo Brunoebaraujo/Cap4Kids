@@ -55,8 +55,9 @@ button:hover {
   align-items: center;
   justify-items: center;
   overflow: hidden;
-  border: 3px solid #5b3b24;
-  background: #10170f;
+  border: 3px solid #8a6a35;
+  background: #0b120b;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.42), inset 0 0 0 1px #19140d;
   image-rendering: pixelated;
 }
 
@@ -68,6 +69,7 @@ button:hover {
 .game-root canvas {
   display: block;
   image-rendering: pixelated;
+  border-radius: 2px;
 }
 
 .hud {
