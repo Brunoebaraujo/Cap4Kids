@@ -426,7 +426,7 @@ export class FarmScene extends Phaser.Scene {
 
     const task = this.taskForFieldState(plot.state);
     if (task === 'Plant Wheat') {
-      emitGameEvent('chooseCrop', hit.plotId);
+      emitGameEvent('chooseCrop', plot.id);
       this.publishState('Escolha qual cultura plantar nesta parcela preparada.');
       return;
     }
