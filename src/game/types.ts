@@ -10,7 +10,7 @@ export type AdminEventType = 'drought' | 'rain' | 'subsidy' | 'inflation' | 'loc
 export type CropId = 'wheat' | 'rice' | 'tomato' | 'banana';
 
 // Task targets may include exact world coordinates for per-plot work.
-export interface TaskCommand { id: number; type: TaskType; targetX: number; targetY: number; targetPlotId?: string; targetWorldX?: number; targetWorldY?: number }
+export interface TaskCommand { id: number; type: TaskType; targetX: number; targetY: number; targetPlotId?: string; targetWorldX?: number; targetWorldY?: number; cropId?: CropId }
 export interface Inventory { seeds: Record<CropId, number>; wheat: number; rice: number; tomato: number; banana: number; milk: number }
 export interface Economy {
   coins: number;
@@ -37,5 +37,5 @@ export interface GameSnapshot {
 }
 export interface GameEvents {
   state: GameSnapshot; notification: string; task: TaskType; selectWorker: string; findWorker: string;
-  sell: CropId | 'milk'; buySeeds: CropId; openShop: undefined; closeShop: undefined; nextDay: undefined; adminEvent: AdminEventType; role: GameRole;
+  sell: CropId | 'milk'; buySeeds: CropId; openShop: undefined; closeShop: undefined; chooseCrop: string; plantCrop: { plotId: string; cropId: CropId }; nextDay: undefined; adminEvent: AdminEventType; role: GameRole;
 }
