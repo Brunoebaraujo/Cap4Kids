@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Capitalism 4 Kids - Field Calibrator</title>
+  <style>
+    :root {
+      color: #fff8d6;
+      background: #141f16;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; }
+
+    .shell {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      gap: 12px;
+      min-height: 100vh;
+      padding: 12px;
+    }
+
+    .stage {
+      position: relative;
+      align-self: start;
+      border: 3px solid #8a6a35;
+      background: #081008;
+      overflow: hidden;
+    }
+
+    .stage img {
+      display: block;
+      width: 100%;
+      height: auto;
+      user-select: none;
+    }
+
+    .stage svg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      cursor: crosshair;
+    }
+
+    .panel {
+      display: grid;
+      gap: 10px;
+      align-content: start;
+      padding: 12px;
+      border: 2px solid #6d4a2c;
+      background: #2a2118;
+    }
+
+    h1 { margin: 0; font-size: 20px; }
+    p { margin: 0; color: #d6ba7d; font-size: 13px; line-height: 1.45; }
+    label { display: grid; gap: 4px; color: #ffe4a1; font-size: 13px; }
+    select, textarea, button {
+      width: 100%;
+      border: 1px solid #9f7443;
+      background: #513820;
+      color: #fff8d6;
+      font: inherit;
+    }
+    select, button { min-height: 34px; }
+    button { cursor: pointer; }
+    button:hover { background: #654627; }
+    textarea {
+      min-height: 260px;
+      padding: 8px;
+      background: #15120f;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 12px;
+      resize: vertical;
+    }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .active { border-color: #65e2ff; box-shadow: inset 0 0 0 1px #65e2ff; }
+    .hint { color: #d9f7ff; }
+
+    @media (max-width: 900px) {
+      .shell { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="stage" id="stage">
+      <img id="map" src="./assets/world/farm-vertical-slice.webp" alt="Mapa da fazenda" draggable="false" />
+      <svg id="overlay" viewBox="0 0 1 1" preserveAspectRatio="none"></svg>
+    </section>
+
+    <aside class="panel">
+      <h1>Calibrador de campos</h1>
+      <p class="hint">Escolha um campo, clique os cantos em ordem. Use “Ponto de trabalho” para marcar onde o trabalhador deve parar.</p>
+
+      <label>
+        Campo
+        <select id="fieldSelect">
+          <option value="1">Campo 1</option>
+          <option value="2">Campo 2</option>
+          <option value="3">Campo 3</option>
+        </select>
+      </label>
+
+      <div class="grid">
+        <button id="modePolygon" class="active">Cantos</button>
+        <button id="modeWork">Ponto de trabalho</button>
+      </div>
+
+      <div class="grid">
+        <button id="undo">Desfazer ponto</button>
+        <button id="clear">Limpar campo</button>
+      </div>
+
+      <button id="copy">Copiar JSON</button>
+      <p id="status">Campo 1: clique os cantos do campo.</p>
+      <textarea id="output" spellcheck="false"></textarea>
+    </aside>
+  </main>
+
+  <script>
+    const layouts = [
+      { id: 1, polygon: [], workPoint: { x: 0.5, y: 0.5 } },
+      { id: 2, polygon: [], workPoint: { x: 0.12, y: 0.6 } },
+      { id: 3, polygon: [], workPoint: { x: 0.3, y: 0.75 } },
+    ];
+
+    const colors = { 1: '#ffe16b', 2: '#65e2ff', 3: '#ff8cc6' };
+    let selectedId = 1;
+    let mode = 'polygon';
+
+    const overlay = document.getElementById('overlay');
+    const fieldSelect = document.getElementById('fieldSelect');
+    const modePolygon = document.getElementById('modePolygon');
+    const modeWork = document.getElementById('modeWork');
+    const output = document.getElementById('output');
+    const status = document.getElementById('status');
+
+    function selectedLayout() {
+      return layouts.find((layout) => layout.id === selectedId);
+    }
+
+    function normalizeEvent(event) {
+      const rect = overlay.getBoundingClientRect();
+      return {
+        x: Math.max(0, Math.min(1, Number(((event.clientX - rect.left) / rect.width).toFixed(4)))),
+        y: Math.max(0, Math.min(1, Number(((event.clientY - rect.top) / rect.height).toFixed(4)))),
+      };
+    }
+
+    function setMode(nextMode) {
+      mode = nextMode;
+      modePolygon.classList.toggle('active', mode === 'polygon');
+      modeWork.classList.toggle('active', mode === 'work');
+      status.textContent = mode === 'polygon'
+        ? `Campo ${selectedId}: clique os cantos do campo.`
+        : `Campo ${selectedId}: clique onde o trabalhador deve parar.`;
+    }
+
+    function render() {
+      overlay.innerHTML = '';
+      for (const layout of layouts) {
+        const color = colors[layout.id];
+        if (layout.polygon.length > 1) {
+          const polygon = document.createElementNS('http://www.w3.org/2000/svg', layout.polygon.length > 2 ? 'polygon' : 'polyline');
+          polygon.setAttribute('points', layout.polygon.map((point) => `${point.x},${point.y}`).join(' '));
+          polygon.setAttribute('fill', layout.polygon.length > 2 ? `${color}22` : 'none');
+          polygon.setAttribute('stroke', color);
+          polygon.setAttribute('stroke-width', layout.id === selectedId ? '0.004' : '0.0025');
+          polygon.setAttribute('vector-effect', 'non-scaling-stroke');
+          overlay.appendChild(polygon);
+        }
+
+        for (const point of layout.polygon) {
+          const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          dot.setAttribute('cx', point.x);
+          dot.setAttribute('cy', point.y);
+          dot.setAttribute('r', layout.id === selectedId ? '0.008' : '0.005');
+          dot.setAttribute('fill', color);
+          overlay.appendChild(dot);
+        }
+
+        const work = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        work.setAttribute('cx', layout.workPoint.x);
+        work.setAttribute('cy', layout.workPoint.y);
+        work.setAttribute('r', layout.id === selectedId ? '0.011' : '0.007');
+        work.setAttribute('fill', 'none');
+        work.setAttribute('stroke', '#ff4f7b');
+        work.setAttribute('stroke-width', layout.id === selectedId ? '0.004' : '0.0025');
+        work.setAttribute('vector-effect', 'non-scaling-stroke');
+        overlay.appendChild(work);
+      }
+
+      output.value = JSON.stringify(layouts, null, 2);
+    }
+
+    overlay.addEventListener('click', (event) => {
+      const layout = selectedLayout();
+      const point = normalizeEvent(event);
+      if (mode === 'work') {
+        layout.workPoint = point;
+        status.textContent = `Campo ${selectedId}: ponto de trabalho atualizado.`;
+      } else {
+        layout.polygon.push(point);
+        if (layout.polygon.length === 1) layout.workPoint = point;
+        status.textContent = `Campo ${selectedId}: ${layout.polygon.length} ponto(s).`;
+      }
+      render();
+    });
+
+    fieldSelect.addEventListener('change', () => {
+      selectedId = Number(fieldSelect.value);
+      setMode(mode);
+      render();
+    });
+
+    modePolygon.addEventListener('click', () => setMode('polygon'));
+    modeWork.addEventListener('click', () => setMode('work'));
+
+    document.getElementById('undo').addEventListener('click', () => {
+      selectedLayout().polygon.pop();
+      render();
+    });
+
+    document.getElementById('clear').addEventListener('click', () => {
+      selectedLayout().polygon = [];
+      render();
+    });
+
+    document.getElementById('copy').addEventListener('click', async () => {
+      output.select();
+      await navigator.clipboard.writeText(output.value);
+      status.textContent = 'JSON copiado.';
+    });
+
+    setMode('polygon');
+    render();
+  </script>
+</body>
+</html>

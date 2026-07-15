@@ -1,754 +1,865 @@
 import Phaser from 'phaser';
 import { createPixelAssets } from '../assets/createPixelAssets';
-import { getTileIndex, preloadTilePngs, type TileId } from '../assets/tileRegistry';
-import { Maya } from '../characters/Maya';
-import { emitGameEvent } from '../eventBus';
-import { EconomySystem, WHEAT_HARVEST_YIELD, WHEAT_PRICE, WHEAT_SEED_COST, type EconomySaveState } from '../systems/EconomySystem';
-import { FieldSystem, type FieldSaveState } from '../systems/FieldSystem';
-import { GameClockSystem } from '../systems/GameClockSystem';
-import { TaskSystem, type TaskSaveState } from '../systems/TaskSystem';
-import { TILE_SIZE, type AnimationState, type CameraMode, type GameClockSnapshot, type TaskType } from '../types';
+import { CROPS, cropById } from '../data/crops';
+import { FIELD_LAYOUTS, fieldPolygon, fieldWorkPoint, type FieldLayout } from '../data/fieldLayout';
+import { MAP_AREAS } from '../data/mapAreas';
+import { emitGameEvent, gameEvents } from '../eventBus';
+import { EconomySystem } from '../systems/EconomySystem';
+import { FieldSystem } from '../systems/FieldSystem';
+import { TaskSystem } from '../systems/TaskSystem';
+import {
+  type AnimationState,
+  type AdminEventType,
+  type GameRole,
+  type Direction,
+  type TaskCommand,
+  type TaskType,
+  type CropId,
+  type WorkerSnapshot,
+  type WorkerStatus,
+} from '../types';
 
-export const WORLD_WIDTH = 4000;
-export const WORLD_HEIGHT = 3000;
-export const CAMERA_ZOOM = 1.5;
-const WORLD_COLUMNS = Math.ceil(WORLD_WIDTH / TILE_SIZE);
-const WORLD_ROWS = Math.ceil(WORLD_HEIGHT / TILE_SIZE);
-const MAYA_SPEED = 150;
-const CAMERA_PAN_SPEED = 520;
-const CAMERA_LERP = 0.12;
-const TASK_DURATION = 1.2;
-const TASK_ARRIVAL_DISTANCE = 3;
-const SAVE_KEY = 'cap4kids.save.v1';
+const WORLD_WIDTH = 20;
+const WORLD_HEIGHT = 13;
+const VIEW_WIDTH = 1448;
+const VIEW_HEIGHT = 1086;
+const ISO_ORIGIN_X = 724;
+const ISO_ORIGIN_Y = 260;
+const ISO_HALF_WIDTH = 28;
+const ISO_HALF_HEIGHT = 14;
+const MOVE_DURATION = 150;
+const TASK_DURATION = 650;
+const MAYA_ID = 'maya';
+const BARN_TARGET = { tileX: 10, tileY: 10, x: 1035, y: 295 };
+const FARMHOUSE_CAMERA = { x: 520, y: 330 };
+const START_POSITIONS: Record<string, { tileX: number; tileY: number; x: number; y: number }> = {
+  maya: { tileX: 0, tileY: 0, x: 520, y: 365 },
+  'worker-1': { tileX: 0, tileY: 1, x: 1090, y: 530 },
+};
 
-const LANDMARKS = {
-  house: { tileX: 28, tileY: 16, widthTiles: 7, heightTiles: 5 },
-  cowPen: { tileX: 99, tileY: 39, widthTiles: 10, heightTiles: 7 },
-  storage: { tileX: 61, tileY: 81, widthTiles: 7, heightTiles: 4 },
-  shippingBin: { tileX: 66, tileY: 77, widthTiles: 3, heightTiles: 3 },
-} as const;
-
-interface TravelTask {
-  task: TaskType;
-  targetX: number;
-  targetY: number;
-}
-
-interface ActiveWork {
-  task: TaskType;
-  elapsed: number;
-  duration: number;
-}
-
-interface CameraDragState {
-  pointerX: number;
-  pointerY: number;
-  scrollX: number;
-  scrollY: number;
-}
-
-interface SaveState {
-  economy: EconomySaveState;
-  fields: FieldSaveState;
-  tasks: TaskSaveState;
-  clock: GameClockSnapshot;
-}
-
-function tileCenter(tile: number) {
-  return tile * TILE_SIZE + TILE_SIZE / 2;
-}
-
-function landmarkCenter(landmark: { tileX: number; tileY: number }) {
-  return {
-    x: tileCenter(landmark.tileX),
-    y: tileCenter(landmark.tileY),
-  };
-}
-
-function tileNoise(x: number, y: number) {
-  return Math.abs((x * 73856093) ^ (y * 19349663)) % 100;
+interface WorkerRuntime {
+  id: string;
+  name: string;
+  tileX: number;
+  tileY: number;
+  worldX: number;
+  worldY: number;
+  sprite: Phaser.GameObjects.Sprite;
+  selectionRing: Phaser.GameObjects.Graphics;
+  nameLabel: Phaser.GameObjects.Text;
+  statusLabel: Phaser.GameObjects.Text;
+  tasks: TaskSystem;
+  status: WorkerStatus;
+  animationState: AnimationState;
 }
 
 export class FarmScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
-  private maya!: Maya;
-  private pathLayer!: Phaser.Tilemaps.TilemapLayer;
-  private fieldLayer!: Phaser.Tilemaps.TilemapLayer;
-  private decorationLayer!: Phaser.Tilemaps.TilemapLayer;
-  private buildingLayer!: Phaser.Tilemaps.TilemapLayer;
-  private collisionRects: Phaser.Geom.Rectangle[] = [];
-  private mayaX = tileCenter(17);
-  private mayaY = tileCenter(19);
-  private animationState: AnimationState = 'idle';
-  private cameraMode: CameraMode = 'free';
-  private activeTravel: TravelTask | null = null;
-  private activeWork: ActiveWork | null = null;
-  private cameraDrag: CameraDragState | null = null;
-  private cameraStatusText!: Phaser.GameObjects.Text;
+  private fieldLayer!: Phaser.GameObjects.Graphics;
+  private cowSprite?: Phaser.GameObjects.Image;
+  private cowMilkedToday = false;
+  private selectedWorkerId = MAYA_ID;
+  private nextTaskId = 1;
+  private role: GameRole = 'player';
+  private skipNextWorldClick = false;
+  private hoveredFieldId: number | null = null;
+  private debugFields = false;
+  private fieldDebugLabels: Phaser.GameObjects.Text[] = [];
+  private cameraDragStart?: { pointerX: number; pointerY: number; scrollX: number; scrollY: number };
+  private cameraWasDragged = false;
 
+  private readonly workers = new Map<string, WorkerRuntime>();
   private readonly fields = new FieldSystem();
-  private readonly tasks = new TaskSystem();
   private readonly economy = new EconomySystem();
-  private readonly clock = new GameClockSystem();
 
   constructor() {
     super('FarmScene');
   }
 
   preload() {
-    preloadTilePngs(this);
-    Maya.preload(this);
+    this.load.image('farm-world-large', './assets/world/farm-world-large.png');
   }
 
   create() {
-    this.loadGame();
     createPixelAssets(this);
-    Maya.createAnimations(this);
+    this.createAnimations();
     this.createWorld();
-    this.createControls();
+    this.createWorkers();
 
-    this.maya = new Maya(this, this.mayaX, this.mayaY);
-
-    this.configureCamera();
-    this.createCameraStatusText();
-    this.bindActiveTimeEvents();
-
-    if (this.tasks.currentTask) this.beginTaskTravel(this.tasks.currentTask);
-    else this.publishState('Compre sementes, prepare o solo, plante trigo e venda no Shipping Bin.');
-  }
-
-  update(_time: number, delta: number) {
-    const active = this.isActiveSessionRunning();
-    if (this.clock.setRunning(active)) this.publishState(active ? 'Tempo ativo.' : 'Tempo pausado.');
-    if (!active) return;
-
-    const deltaSeconds = delta / 1000;
-    const elapsedDays = this.clock.update(deltaSeconds);
-    for (let i = 0; i < elapsedDays; i += 1) {
-      this.economy.payDailyCost();
-    }
-
-    if (this.fields.updateGrowth(deltaSeconds)) {
-      this.redrawFields();
-      this.publishState('O trigo cresceu.');
-    }
-
-    this.readTaskInput();
-
-    if (this.activeTravel) {
-      this.moveMayaToTask(deltaSeconds);
-      return;
-    }
-
-    if (this.activeWork) {
-      this.updateActiveWork(deltaSeconds);
-      return;
-    }
-
-    if (this.cameraMode === 'free') {
-      this.panFreeCamera(deltaSeconds);
-    }
-
-    if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) this.performContextAction();
-  }
-
-  private createControls() {
     this.cursors = this.input.keyboard!.createCursorKeys();
-    this.keys = this.input.keyboard!.addKeys('W,A,S,D,B,SPACE,ONE,TWO,THREE,FOUR,FIVE') as Record<string, Phaser.Input.Keyboard.Key>;
-    this.input.keyboard!.addCapture(['W', 'A', 'S', 'D', 'B', 'SPACE', 'UP', 'DOWN', 'LEFT', 'RIGHT']);
+    this.keys = this.input.keyboard!.addKeys('W,A,S,D,G,SPACE,ONE,TWO,THREE,FOUR') as Record<string, Phaser.Input.Keyboard.Key>;
 
-    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      if (this.cameraMode !== 'free') return;
-      this.cameraDrag = {
-        pointerX: pointer.x,
-        pointerY: pointer.y,
-        scrollX: this.cameras.main.scrollX,
-        scrollY: this.cameras.main.scrollY,
-      };
+    this.input.on('pointerdown', this.handlePointerDown, this);
+    this.input.on('pointerup', this.handleWorldClick, this);
+    this.input.on('pointermove', this.handlePointerMove, this);
+    gameEvents.on('task', this.enqueueTaskForSelectedWorker, this);
+    gameEvents.on('selectWorker', this.selectWorker, this);
+    gameEvents.on('findWorker', this.centerCameraOnWorker, this);
+    gameEvents.on('sell', this.sellProduct, this);
+    gameEvents.on('buySeeds', this.buySeeds, this);
+    gameEvents.on('plantCrop', this.plantSelectedCrop, this);
+    gameEvents.on('chooseHarvest', this.chooseHarvest, this);
+    gameEvents.on('harvestPlot', this.harvestSelectedPlot, this);
+    gameEvents.on('nextDay', this.nextDay, this);
+    gameEvents.on('adminEvent', this.applyAdminEvent, this);
+    gameEvents.on('role', this.setRole, this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.input.off('pointerdown', this.handlePointerDown, this);
+      this.input.off('pointerup', this.handleWorldClick, this);
+      this.input.off('pointermove', this.handlePointerMove, this);
+      gameEvents.off('task', this.enqueueTaskForSelectedWorker, this);
+      gameEvents.off('selectWorker', this.selectWorker, this);
+      gameEvents.off('findWorker', this.centerCameraOnWorker, this);
+      gameEvents.off('sell', this.sellProduct, this);
+      gameEvents.off('buySeeds', this.buySeeds, this);
+      gameEvents.off('plantCrop', this.plantSelectedCrop, this);
+      gameEvents.off('chooseHarvest', this.chooseHarvest, this);
+      gameEvents.off('harvestPlot', this.harvestSelectedPlot, this);
+      gameEvents.off('nextDay', this.nextDay, this);
+      gameEvents.off('adminEvent', this.applyAdminEvent, this);
+      gameEvents.off('role', this.setRole, this);
     });
 
-    this.input.on('pointerup', () => {
-      this.cameraDrag = null;
-    });
-
-    this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
-      if (this.cameraMode !== 'free' || !pointer.isDown || !this.cameraDrag) return;
-
-      const camera = this.cameras.main;
-      const nextScrollX = this.cameraDrag.scrollX - (pointer.x - this.cameraDrag.pointerX) / camera.zoom;
-      const nextScrollY = this.cameraDrag.scrollY - (pointer.y - this.cameraDrag.pointerY) / camera.zoom;
-      this.setCameraScroll(nextScrollX, nextScrollY);
-    });
+    this.selectWorker(MAYA_ID, false);
+    this.publishState('Selecione Maya e clique no Campo 1 para preparar o solo.');
   }
 
-  private configureCamera() {
-    const camera = this.cameras.main;
-    camera.setBackgroundColor('#2f6f43');
-    camera.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
-    camera.setZoom(CAMERA_ZOOM);
-    camera.centerOn(this.mayaX, this.mayaY);
-    this.setCameraMode('free');
-  }
+  update() {
+    if (Phaser.Input.Keyboard.JustDown(this.keys.G)) {
+      this.debugFields = !this.debugFields;
+      this.redrawFields();
+      this.publishState(this.debugFields ? 'Grade de campos ativada.' : 'Grade de campos desativada.');
+    }
+    if (Phaser.Input.Keyboard.JustDown(this.keys.ONE)) this.enqueueTaskForSelectedWorker('Prepare Soil');
+    if (Phaser.Input.Keyboard.JustDown(this.keys.TWO)) this.enqueueTaskForSelectedWorker('Plant Wheat');
+    if (Phaser.Input.Keyboard.JustDown(this.keys.THREE)) this.enqueueTaskForSelectedWorker('Harvest Wheat');
+    if (Phaser.Input.Keyboard.JustDown(this.keys.FOUR)) this.enqueueTaskForSelectedWorker('Milk Cow');
 
-  private createCameraStatusText() {
-    this.cameraStatusText = this.add.text(12, 104, 'Camera: Livre', {
-      fontFamily: 'monospace',
-      fontSize: '14px',
-      color: '#fff4bd',
-      backgroundColor: '#223827',
-      padding: { x: 8, y: 5 },
-    });
-    this.cameraStatusText.setScrollFactor(0);
-    this.cameraStatusText.setDepth(1000);
-  }
-
-  private bindActiveTimeEvents() {
-    document.addEventListener('visibilitychange', () => this.publishState());
-    window.addEventListener('blur', () => this.publishState('Tempo pausado.'));
-    window.addEventListener('focus', () => this.publishState('Tempo ativo.'));
-  }
-
-  private isActiveSessionRunning() {
-    return document.visibilityState === 'visible' && document.hasFocus();
-  }
-
-  private setCameraMode(mode: CameraMode) {
-    if (this.cameraMode === mode) return;
-
-    this.cameraMode = mode;
-    this.cameraDrag = null;
-
-    if (!this.maya) return;
-
-    const camera = this.cameras.main;
-    if (mode === 'followMaya') {
-      camera.centerOn(this.maya.x, this.maya.y);
-      camera.startFollow(this.maya.sprite, true, CAMERA_LERP, CAMERA_LERP);
-    } else {
-      camera.stopFollow();
-      this.setCameraScroll(camera.scrollX, camera.scrollY);
+    const selectedWorker = this.getSelectedWorker();
+    if (!selectedWorker.tasks.currentTask) {
+      const direction = this.readDirection();
+      if (direction) {
+        this.moveWorkerByInput(selectedWorker, direction);
+        return;
+      }
     }
 
-    this.updateCameraStatusText();
-    this.publishState();
+    if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) this.performContextAction(selectedWorker);
   }
 
-  private updateCameraStatusText() {
-    if (!this.cameraStatusText) return;
-    this.cameraStatusText.setText(this.cameraMode === 'free' ? 'Camera: Livre' : 'Camera: Seguindo Maya');
+  private createAnimations() {
+    const animationMap: Array<[string, number]> = [
+      ['idle', 0],
+      ['walk', 1],
+      ['prepare soil', 2],
+      ['plant', 3],
+      ['harvest', 4],
+      ['milk cow', 5],
+    ];
+
+    animationMap.forEach(([key, frame]) => {
+      if (this.anims.exists(`maya-${key}`)) return;
+      this.anims.create({ key: `maya-${key}`, frames: [{ key: 'maya', frame }], frameRate: 1 });
+    });
   }
 
   private createWorld() {
-    this.physics.world.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    this.cameras.main.setBackgroundColor('#172316');
+    this.add.image(VIEW_WIDTH / 2, VIEW_HEIGHT / 2, 'farm-world-large').setDepth(0);
+    this.cameras.main.setBounds(0, 0, VIEW_WIDTH, VIEW_HEIGHT);
+    this.cameras.main.centerOn(FARMHOUSE_CAMERA.x, FARMHOUSE_CAMERA.y);
 
-    const map = this.make.tilemap({ width: WORLD_COLUMNS, height: WORLD_ROWS, tileWidth: TILE_SIZE, tileHeight: TILE_SIZE });
-    const tileset = map.addTilesetImage('farm-tiles', 'farm-tiles', TILE_SIZE, TILE_SIZE, 0, 0);
-    const groundLayer = map.createBlankLayer('Ground', tileset!, 0, 0)!;
-    this.pathLayer = map.createBlankLayer('Paths', tileset!, 0, 0)!;
-    this.fieldLayer = map.createBlankLayer('Fields', tileset!, 0, 0)!;
-    this.decorationLayer = map.createBlankLayer('Decorations', tileset!, 0, 0)!;
-    this.buildingLayer = map.createBlankLayer('Buildings', tileset!, 0, 0)!;
+    const vignette = this.add.graphics().setDepth(1);
+    vignette.fillStyle(0x071008, 0.10).fillRect(0, 0, VIEW_WIDTH, 60);
+    vignette.fillStyle(0x071008, 0.10).fillRect(0, VIEW_HEIGHT - 46, VIEW_WIDTH, 46);
 
-    groundLayer.setDepth(0);
-    this.pathLayer.setDepth(2);
-    this.fieldLayer.setDepth(4);
-    this.decorationLayer.setDepth(7);
-    this.buildingLayer.setDepth(9);
-
-    for (let y = 0; y < WORLD_ROWS; y += 1) {
-      for (let x = 0; x < WORLD_COLUMNS; x += 1) {
-        groundLayer.putTileAt(this.tileIndexForGrass(x, y), x, y);
-        if (this.isPathTile(x, y)) this.pathLayer.putTileAt(this.tileIndexForPath(x, y), x, y);
-        else if (this.isPathEdgeTile(x, y)) this.pathLayer.putTileAt(this.tileIndex('path_edge'), x, y);
-        if (this.isWaterTile(x, y)) this.pathLayer.putTileAt(this.tileIndex('water'), x, y);
-      }
-    }
-
-    this.createBoundaryFences();
+    this.fieldLayer = this.add.graphics().setDepth(2);
     this.redrawFields();
-    this.createLandmarks();
-    this.createExplorationProps();
+
+    const cowStart = this.randomPointInArea('corral') ?? { x: BARN_TARGET.x - 54, y: BARN_TARGET.y + 16 };
+    this.cowSprite = this.add.image(cowStart.x, cowStart.y, 'cow-placeholder')
+      .setOrigin(0.5, 1)
+      .setScale(1.25)
+      .setDepth(9)
+      .setAlpha(1)
+      .setVisible(true);
+    this.scheduleCowWander();
+
+    this.add.text(24, 20, 'Selecione um trabalhador e clique em um campo.', {
+      fontFamily: 'monospace',
+      fontSize: '11px',
+      color: '#fff8d6',
+      backgroundColor: '#151b12cc',
+      padding: { x: 8, y: 5 },
+    }).setDepth(20).setScrollFactor(0);
   }
 
-  private tileIndex(id: TileId) {
-    return getTileIndex(id);
+  private isoToScreen(tileX: number, tileY: number): [number, number] {
+    return [ISO_ORIGIN_X + (tileX - tileY) * ISO_HALF_WIDTH, ISO_ORIGIN_Y + (tileX + tileY) * ISO_HALF_HEIGHT];
   }
 
-  private tileIndexForGrass(x: number, y: number) {
-    const noise = tileNoise(x, y);
-    if (noise < 5) return this.tileIndex('grass_flower');
-    if (noise < 10) return this.tileIndex('grass_clover');
-    if (noise < 16) return this.tileIndex('grass_worn');
-    if (noise < 21) return this.tileIndex('grass_rock_small');
-    if (noise < 42) return this.tileIndex('grass_dark');
-    return this.tileIndex('grass_base');
+  private createWorkers() {
+    this.addWorker(MAYA_ID, 'Maya', 0, 0, undefined);
+    this.addWorker('worker-1', 'Worker 1', 0, 1, 0x89c4ff);
   }
 
-  private tileIndexForPath(x: number, y: number) {
-    const north = this.isPathTile(x, y - 1);
-    const east = this.isPathTile(x + 1, y);
-    const south = this.isPathTile(x, y + 1);
-    const west = this.isPathTile(x - 1, y);
-    const count = [north, east, south, west].filter(Boolean).length;
+  private addWorker(id: string, name: string, tileX: number, tileY: number, tint?: number) {
+    const startPosition = START_POSITIONS[id];
+    const [x, y] = startPosition ? [startPosition.x, startPosition.y] : this.isoToScreen(tileX, tileY);
+    const selectionRing = this.add.graphics().setDepth(8);
+    const sprite = this.add.sprite(x, y, 'maya', 0).setScale(1.45).setDepth(10).setInteractive({ useHandCursor: true });
+    const nameLabel = this.add.text(x, y - 28, name, {
+      fontFamily: 'monospace', fontSize: '10px', color: '#ffffff', backgroundColor: '#1d2418', padding: { x: 3, y: 1 },
+    }).setOrigin(0.5).setDepth(12);
+    const statusLabel = this.add.text(x, y + 18, 'Idle', {
+      fontFamily: 'monospace', fontSize: '9px', color: '#ffe4a1', backgroundColor: '#2d241a', padding: { x: 3, y: 1 },
+    }).setOrigin(0.5).setDepth(12);
 
-    if (count >= 4) return this.tileIndex('path_cross');
-    if (count === 3) {
-      if (!north) return this.tileIndex('path_t_south');
-      if (!east) return this.tileIndex('path_t_west');
-      if (!south) return this.tileIndex('path_t_north');
-      return this.tileIndex('path_t_east');
-    }
-    if (north && east) return this.tileIndex('path_corner_ne');
-    if (east && south) return this.tileIndex('path_corner_se');
-    if (south && west) return this.tileIndex('path_corner_sw');
-    if (west && north) return this.tileIndex('path_corner_nw');
-    if (north || south) return this.tileIndex('path_vertical');
-    return this.tileIndex('path_horizontal');
-  }
+    if (tint) sprite.setTint(tint);
+    sprite.play('maya-idle');
+    sprite.on('pointerdown', () => {
+      this.skipNextWorldClick = true;
+      this.selectWorker(id);
+    });
 
-  private isWaterTile(x: number, y: number) {
-    return (x === 90 || x === 91) && y > 16 && y < 44;
-  }
-
-  private isPathEdgeTile(x: number, y: number) {
-    if (this.isWaterTile(x, y)) return false;
-
-    const neighbors = [
-      [x + 1, y],
-      [x - 1, y],
-      [x, y + 1],
-      [x, y - 1],
-    ];
-
-    return neighbors.some(([neighborX, neighborY]) => this.isPathTile(neighborX, neighborY));
-  }
-
-  private isPathTile(x: number, y: number) {
-    const houseToFields = y >= 19 && y <= 20 && x >= 28 && x <= 30;
-    const fieldConnector = x >= 28 && x <= 29 && y >= 20 && y <= 73;
-    const eastRoad = y >= 43 && y <= 44 && x >= 29 && x <= 104;
-    const southRoad = x >= 61 && x <= 62 && y >= 44 && y <= 82;
-    const storageTurn = y >= 81 && y <= 82 && x >= 61 && x <= 67;
-    const shippingTurn = y >= 77 && y <= 78 && x >= 62 && x <= 67;
-
-    return houseToFields || fieldConnector || eastRoad || southRoad || storageTurn || shippingTurn;
-  }
-
-  private createBoundaryFences() {
-    for (let x = 0; x < WORLD_COLUMNS; x += 1) {
-      this.buildingLayer.putTileAt(this.tileIndex(x === 0 || x === WORLD_COLUMNS - 1 ? 'fence_corner' : 'fence_horizontal'), x, 0);
-      this.buildingLayer.putTileAt(this.tileIndex(x === 0 || x === WORLD_COLUMNS - 1 ? 'fence_corner' : 'fence_horizontal'), x, WORLD_ROWS - 1);
-    }
-
-    for (let y = 1; y < WORLD_ROWS - 1; y += 1) {
-      this.buildingLayer.putTileAt(this.tileIndex('fence_vertical'), 0, y);
-      this.buildingLayer.putTileAt(this.tileIndex('fence_vertical'), WORLD_COLUMNS - 1, y);
-    }
-  }
-
-  private createLandmarks() {
-    this.createHouse();
-    this.createCowPen();
-    this.createStorage();
-    this.createShippingBin();
-  }
-
-  private createHouse() {
-    const { tileX, tileY, widthTiles, heightTiles } = LANDMARKS.house;
-    const left = tileX - Math.floor(widthTiles / 2);
-    const top = tileY - Math.floor(heightTiles / 2);
-
-    for (let x = left; x < left + widthTiles; x += 1) {
-      this.buildingLayer.putTileAt(this.tileIndex(x === left ? 'house_roof_left' : x === left + widthTiles - 1 ? 'house_roof_right' : 'house_roof'), x, top - 1);
-    }
-
-    this.buildingLayer.putTileAt(this.tileIndex('house_chimney'), left + 1, top - 2);
-
-    for (let y = top; y < top + heightTiles; y += 1) {
-      for (let x = left; x < left + widthTiles; x += 1) {
-        this.buildingLayer.putTileAt(this.tileIndex('house_wall'), x, y);
-      }
-    }
-
-    this.buildingLayer.putTileAt(this.tileIndex('house_window'), left + 1, top + 1);
-    this.buildingLayer.putTileAt(this.tileIndex('house_flower_box'), left + 2, top + 1);
-    this.buildingLayer.putTileAt(this.tileIndex('house_door'), left + 3, top + heightTiles - 1);
-    this.buildingLayer.putTileAt(this.tileIndex('house_window'), left + 5, top + 1);
-    this.buildingLayer.putTileAt(this.tileIndex('house_flower_box'), left + 5, top + 2);
-
-    this.addCollisionRect(left * TILE_SIZE, (top - 1) * TILE_SIZE, widthTiles * TILE_SIZE, (heightTiles + 1) * TILE_SIZE);
-  }
-
-  private createCowPen() {
-    const { tileX, tileY, widthTiles, heightTiles } = LANDMARKS.cowPen;
-    const left = tileX - Math.floor(widthTiles / 2);
-    const top = tileY - Math.floor(heightTiles / 2);
-    const gateX = left + Math.floor(widthTiles / 2);
-    const bottom = top + heightTiles - 1;
-
-    for (let y = top + 1; y < bottom; y += 1) {
-      for (let x = left + 1; x < left + widthTiles - 1; x += 1) {
-        this.pathLayer.putTileAt(this.tileIndex('corral_dirt'), x, y);
-      }
-    }
-
-    for (let x = left; x < left + widthTiles; x += 1) {
-      this.buildingLayer.putTileAt(this.tileIndex('fence_horizontal'), x, top);
-      this.buildingLayer.putTileAt(this.tileIndex(x === gateX ? 'fence_gate' : 'fence_horizontal'), x, bottom);
-      this.addCollisionRect(x * TILE_SIZE, top * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-      if (x !== gateX) this.addCollisionRect(x * TILE_SIZE, bottom * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-    }
-
-    for (let y = top + 1; y < bottom; y += 1) {
-      this.buildingLayer.putTileAt(this.tileIndex('fence_vertical'), left, y);
-      this.buildingLayer.putTileAt(this.tileIndex('fence_vertical'), left + widthTiles - 1, y);
-      this.addCollisionRect(left * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-      this.addCollisionRect((left + widthTiles - 1) * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-    }
-
-    this.buildingLayer.putTileAt(this.tileIndex('fence_corner'), left, top);
-    this.buildingLayer.putTileAt(this.tileIndex('fence_corner'), left + widthTiles - 1, top);
-    this.buildingLayer.putTileAt(this.tileIndex('fence_corner'), left, bottom);
-    this.buildingLayer.putTileAt(this.tileIndex('fence_corner'), left + widthTiles - 1, bottom);
-  }
-
-  private createStorage() {
-    const { tileX, tileY, widthTiles, heightTiles } = LANDMARKS.storage;
-    const left = tileX - Math.floor(widthTiles / 2);
-    const top = tileY - Math.floor(heightTiles / 2);
-
-    for (let x = left; x < left + widthTiles; x += 1) {
-      this.buildingLayer.putTileAt(this.tileIndex(x === left ? 'house_roof_left' : x === left + widthTiles - 1 ? 'house_roof_right' : 'house_roof'), x, top - 1);
-    }
-
-    for (let y = top; y < top + heightTiles; y += 1) {
-      for (let x = left; x < left + widthTiles; x += 1) {
-        this.buildingLayer.putTileAt(this.tileIndex('house_wall'), x, y);
-      }
-    }
-
-    this.buildingLayer.putTileAt(this.tileIndex('house_door'), left + 1, top + heightTiles - 1);
-    this.buildingLayer.putTileAt(this.tileIndex('house_window'), left + 4, top + 1);
-    this.addCollisionRect(left * TILE_SIZE, (top - 1) * TILE_SIZE, widthTiles * TILE_SIZE, (heightTiles + 1) * TILE_SIZE);
-  }
-
-  private createShippingBin() {
-    const { tileX, tileY, widthTiles, heightTiles } = LANDMARKS.shippingBin;
-    const left = tileX - Math.floor(widthTiles / 2);
-    const top = tileY - Math.floor(heightTiles / 2);
-
-    for (let y = top; y < top + heightTiles; y += 1) {
-      for (let x = left; x < left + widthTiles; x += 1) {
-        this.buildingLayer.putTileAt(this.tileIndex(y === top ? 'house_roof' : 'house_wall'), x, y);
-      }
-    }
-
-    this.buildingLayer.putTileAt(this.tileIndex('house_door'), tileX, top + heightTiles - 1);
-    this.addCollisionRect(left * TILE_SIZE, top * TILE_SIZE, widthTiles * TILE_SIZE, heightTiles * TILE_SIZE);
-  }
-
-  private createExplorationProps() {
-    for (let i = 0; i < 180; i += 1) {
-      const tileX = 5 + ((i * 11) % (WORLD_COLUMNS - 10));
-      const tileY = 5 + ((i * 7) % (WORLD_ROWS - 10));
-      const x = tileCenter(tileX);
-      const y = tileCenter(tileY);
-
-      if (this.isNearLandmark(x, y) || this.isPathTile(tileX, tileY) || this.isPathEdgeTile(tileX, tileY)) continue;
-
-      if (i % 7 === 0) this.placeDecorationTile('tree', tileX, tileY, true);
-      else if (i % 7 === 1) this.placeDecorationTile('bush', tileX, tileY, true);
-      else if (i % 7 === 2) this.placeDecorationTile('rock', tileX, tileY, true);
-      else if (i % 3 === 0) this.placeDecorationTile('flower', tileX, tileY, false);
-    }
-  }
-
-  private placeDecorationTile(tileId: TileId, tileX: number, tileY: number, blocksMovement: boolean) {
-    this.decorationLayer.putTileAt(this.tileIndex(tileId), tileX, tileY);
-
-    if (blocksMovement) {
-      this.addCollisionRect(tileX * TILE_SIZE, tileY * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-    }
-  }
-
-  private isNearLandmark(x: number, y: number) {
-    const house = landmarkCenter(LANDMARKS.house);
-    const cowPen = landmarkCenter(LANDMARKS.cowPen);
-    const storage = landmarkCenter(LANDMARKS.storage);
-    const shippingBin = landmarkCenter(LANDMARKS.shippingBin);
-    const protectedAreas = [
-      { x: house.x, y: house.y, radius: 13 * TILE_SIZE },
-      { x: tileCenter(24), y: tileCenter(42), radius: 9 * TILE_SIZE },
-      { x: tileCenter(28), y: tileCenter(72), radius: 9 * TILE_SIZE },
-      { x: cowPen.x, y: cowPen.y, radius: 11 * TILE_SIZE },
-      { x: storage.x, y: storage.y, radius: 10 * TILE_SIZE },
-      { x: shippingBin.x, y: shippingBin.y, radius: 5 * TILE_SIZE },
-    ];
-
-    return protectedAreas.some((area) => Phaser.Math.Distance.Between(x, y, area.x, area.y) < area.radius);
+    const worker: WorkerRuntime = {
+      id, name, tileX, tileY, worldX: x, worldY: y, sprite, selectionRing, nameLabel, statusLabel,
+      tasks: new TaskSystem(), status: 'Idle', animationState: 'idle',
+    };
+    this.workers.set(id, worker);
+    this.updateWorkerVisuals(worker);
   }
 
   private redrawFields() {
-    this.fieldLayer.fill(-1);
+    this.fieldLayer.clear();
+    this.fieldDebugLabels.forEach((label) => label.destroy());
+    this.fieldDebugLabels = [];
 
-    this.fields.allFields.forEach((field) => {
-      for (let y = field.tileY - 1; y <= field.tileY + 1; y += 1) {
-        for (let x = field.tileX - 1; x <= field.tileX + 1; x += 1) {
-          this.fieldLayer.putTileAt(this.tileIndexForField(field.state), x, y);
+    FIELD_LAYOUTS.forEach((layout) => {
+      const field = this.fields.getFieldById(layout.id);
+      if (!field) return;
+      const polygon = new Phaser.Geom.Polygon(fieldPolygon(layout, VIEW_WIDTH, VIEW_HEIGHT));
+      const isHovered = this.hoveredFieldId === field.id;
+      this.drawPlotStates(layout, isHovered);
+      this.fieldLayer.lineStyle(this.debugFields || isHovered ? 2 : 0, field.state === 'Locked' ? 0xb5b0a3 : 0xffd86b, this.debugFields ? 0.8 : isHovered ? 0.9 : 0);
+      this.fieldLayer.strokePoints(polygon.points, true);
+      if (this.debugFields) this.drawFieldDebug(layout, polygon, field.state);
+    });
+  }
+
+  private drawPlotStates(layout: FieldLayout, isHovered: boolean) {
+    const field = this.fields.getFieldById(layout.id);
+    if (!field?.plots) return;
+    const corners = fieldPolygon(layout, VIEW_WIDTH, VIEW_HEIGHT);
+    if (corners.length < 4) return;
+    const tl = corners[0];
+    const tr = corners[1];
+    const br = corners[2];
+    const bl = corners[corners.length - 2];
+    const lerp = (a: { x: number; y: number }, b: { x: number; y: number }, t: number) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+
+    field.plots.forEach((plot) => {
+      const rowTop = plot.row / 6;
+      const rowBottom = (plot.row + 1) / 6;
+      const colLeft = plot.col / 6;
+      const colRight = (plot.col + 1) / 6;
+      const leftTop = lerp(tl, bl, rowTop);
+      const rightTop = lerp(tr, br, rowTop);
+      const leftBottom = lerp(tl, bl, rowBottom);
+      const rightBottom = lerp(tr, br, rowBottom);
+      const p1 = lerp(leftTop, rightTop, colLeft);
+      const p2 = lerp(leftTop, rightTop, colRight);
+      const p3 = lerp(leftBottom, rightBottom, colRight);
+      const p4 = lerp(leftBottom, rightBottom, colLeft);
+      const cropColor = plot.cropId ? Number.parseInt(cropById(plot.cropId).color.slice(1), 16) : 0;
+      const color = plot.state === 'Prepared' ? 0x4b2d18 : plot.state === 'Planted' ? cropColor || 0x8a6a31 : plot.state === 'Growing' ? cropColor || 0x4f8d35 : plot.state === 'Mature' ? cropColor || 0xd8a72d : plot.state === 'Locked' ? 0x30352e : 0x6f4c2d;
+      const alpha = plot.state === 'Raw' ? (isHovered ? 0.08 : 0.02) : plot.state === 'Locked' ? 0.08 : 0.38;
+      this.fieldLayer.fillStyle(color, alpha);
+      this.fieldLayer.lineStyle(1, plot.state === 'Locked' ? 0x777777 : 0xffe28a, this.debugFields || isHovered ? 0.30 : 0.10);
+      this.fieldLayer.fillPoints([p1, p2, p3, p4], true).strokePoints([p1, p2, p3, p4], true);
+      const cx = (p1.x + p2.x + p3.x + p4.x) / 4;
+      const cy = (p1.y + p2.y + p3.y + p4.y) / 4;
+      if (plot.state === 'Prepared') this.fieldLayer.lineStyle(1, 0x2b170e, 0.65).lineBetween(cx - 6, cy + 3, cx + 6, cy - 3);
+      if (plot.state === 'Planted') this.fieldLayer.fillStyle(0x5f9b35, 0.75).fillCircle(cx, cy, 2);
+      if (plot.state === 'Growing') this.fieldLayer.lineStyle(2, 0x6fb842, 0.9).lineBetween(cx, cy + 5, cx, cy - 6);
+      if (plot.state === 'Mature') this.fieldLayer.fillStyle(0xf0c552, 0.95).fillCircle(cx, cy - 3, 3);
+    });
+  }
+
+  private drawFieldDebug(layout: (typeof FIELD_LAYOUTS)[number], polygon: Phaser.Geom.Polygon, state: string) {
+    this.fieldLayer.fillStyle(0x61d6ff, 0.78);
+    polygon.points.forEach((point) => this.fieldLayer.fillCircle(point.x, point.y, 4));
+    const workPoint = fieldWorkPoint(layout, VIEW_WIDTH, VIEW_HEIGHT);
+    this.fieldLayer.lineStyle(2, 0xff5b6e, 1).strokeCircle(workPoint.x, workPoint.y, 7);
+    const label = this.add.text(workPoint.x + 10, workPoint.y - 20, `Campo ${layout.id}\n${state}`, {
+      fontFamily: 'monospace', fontSize: '11px', color: '#ffffff', backgroundColor: '#101820dd', padding: { x: 5, y: 3 },
+    }).setDepth(30);
+    this.fieldDebugLabels.push(label);
+  }
+
+  private drawFieldState(polygon: Phaser.Geom.Polygon, state: string) {
+    if (state === 'Raw' || state === 'Locked') return;
+    const bounds = Phaser.Geom.Polygon.GetAABB(polygon);
+    const rowGap = state === 'Prepared' ? 11 : state === 'Mature' ? 12 : 14;
+    const columnGap = state === 'Prepared' ? 18 : state === 'Mature' ? 12 : 15;
+
+    for (let y = bounds.top + 10; y < bounds.bottom - 8; y += rowGap) {
+      for (let x = bounds.left + 10; x < bounds.right - 8; x += columnGap) {
+        if (!Phaser.Geom.Polygon.Contains(polygon, x, y)) continue;
+        if (state === 'Prepared') {
+          this.fieldLayer.lineStyle(2, 0x2b170e, 0.62).lineBetween(x - 9, y + 5, x + 9, y - 5);
+          this.fieldLayer.lineStyle(1, 0x7a4b24, 0.45).lineBetween(x - 9, y + 8, x + 9, y - 2);
+        } else if (state === 'Planted') {
+          this.fieldLayer.fillStyle(0xe1c16a, 0.9).fillCircle(x, y, 2);
+          this.fieldLayer.fillStyle(0x5f9b35, 0.55).fillCircle(x + 3, y - 2, 1.5);
+        } else if (state === 'Growing') {
+          this.fieldLayer.lineStyle(3, 0x6fb842, 0.95).lineBetween(x, y + 6, x, y - 9);
+          this.fieldLayer.lineStyle(2, 0xb3d96a, 0.86).lineBetween(x, y - 1, x + 6, y - 6);
+          this.fieldLayer.lineStyle(2, 0x4f8d35, 0.78).lineBetween(x, y, x - 5, y - 4);
+        } else if (state === 'Mature') {
+          this.fieldLayer.lineStyle(3, 0xd8aa36, 0.98).lineBetween(x, y + 7, x, y - 10);
+          this.fieldLayer.lineStyle(2, 0xf2d36b, 0.94).lineBetween(x - 4, y - 5, x + 4, y - 11);
+          this.fieldLayer.fillStyle(0xf0c552, 0.98).fillCircle(x, y - 10, 2.8);
         }
+      }
+    }
+  }
+
+  private moveSelectedWorkerToPoint(x: number, y: number) {
+    const worker = this.getSelectedWorker();
+    if (worker.status === 'Busy') {
+      this.publishState(`${worker.name} está ocupado. Aguarde a tarefa terminar.`);
+      return;
+    }
+    const targetX = Phaser.Math.Clamp(x, 16, VIEW_WIDTH - 16);
+    const targetY = Phaser.Math.Clamp(y, 16, VIEW_HEIGHT - 16);
+    if (!this.isWalkablePoint(targetX, targetY)) {
+      this.publishState('Este ponto não é caminhável. Maya ainda não aprendeu a andar sobre a água.');
+      return;
+    }
+    this.moveWorkerToPoint(worker, targetX, targetY);
+  }
+
+  private readDirection(): Direction | null {
+    if (this.cursors.left.isDown || this.keys.A.isDown) return 'left';
+    if (this.cursors.right.isDown || this.keys.D.isDown) return 'right';
+    if (this.cursors.up.isDown || this.keys.W.isDown) return 'up';
+    if (this.cursors.down.isDown || this.keys.S.isDown) return 'down';
+    return null;
+  }
+
+  private moveWorkerByInput(worker: WorkerRuntime, direction: Direction) {
+    if (worker.status === 'Moving') return;
+    const deltas: Record<Direction, [number, number]> = { down: [0, 1], up: [0, -1], left: [-1, 0], right: [1, 0] };
+    const [dx, dy] = deltas[direction];
+    const nextX = Phaser.Math.Clamp(worker.worldX + dx * 42, 16, VIEW_WIDTH - 16);
+    const nextY = Phaser.Math.Clamp(worker.worldY + dy * 42, 16, VIEW_HEIGHT - 16);
+    if (!this.isWalkablePoint(nextX, nextY)) return;
+    this.moveWorkerToPoint(worker, nextX, nextY).then(() => {
+      if (!worker.tasks.currentTask) {
+        worker.status = 'Idle';
+        this.setWorkerAnimation(worker, 'idle');
+        this.updateWorkerVisuals(worker);
+        this.publishState();
       }
     });
   }
 
-  private tileIndexForField(state: string) {
-    if (state === 'Prepared') return this.tileIndex('field_prepared');
-    if (state === 'Locked') return this.tileIndex('field_locked');
-    if (state === 'Empty') return this.tileIndex('field_harvested');
-    return this.tileIndex('field_planted');
+  private performContextAction(worker: WorkerRuntime) {
+    const field = this.fields.getFieldAt(worker.tileX, worker.tileY) ?? this.fields.getFirstUnlockedField();
+    if (!field) return;
+    const task = this.taskForFieldState(field.state);
+    if (!task) {
+      this.publishState(this.fieldStateMessage(field.state));
+      return;
+    }
+    this.enqueueTask(worker, task, field.tileX, field.tileY);
   }
 
-  private readTaskInput() {
-    if (Phaser.Input.Keyboard.JustDown(this.keys.B)) this.buySeed();
-    if (Phaser.Input.Keyboard.JustDown(this.keys.ONE)) this.enqueueTask('Prepare Soil');
-    if (Phaser.Input.Keyboard.JustDown(this.keys.TWO)) this.enqueueTask('Plant Wheat');
-    if (Phaser.Input.Keyboard.JustDown(this.keys.THREE)) this.enqueueTask('Harvest Wheat');
-    if (Phaser.Input.Keyboard.JustDown(this.keys.FOUR) || Phaser.Input.Keyboard.JustDown(this.keys.FIVE)) this.enqueueTask('Deliver To Shipping Bin');
+  private handlePointerDown(pointer: Phaser.Input.Pointer) {
+    this.cameraWasDragged = false;
+    this.cameraDragStart = { pointerX: pointer.x, pointerY: pointer.y, scrollX: this.cameras.main.scrollX, scrollY: this.cameras.main.scrollY };
   }
 
-  private buySeed() {
-    const bought = this.economy.buySeed();
-    this.publishState(bought ? `Seed bought for ${WHEAT_SEED_COST} coins.` : 'Not enough coins to buy seeds.');
+  private handlePointerMove(pointer: Phaser.Input.Pointer) {
+    if (pointer.isDown && this.cameraDragStart) {
+      const dx = pointer.x - this.cameraDragStart.pointerX;
+      const dy = pointer.y - this.cameraDragStart.pointerY;
+      if (Math.abs(dx) + Math.abs(dy) > 6) this.cameraWasDragged = true;
+      this.cameras.main.scrollX = this.cameraDragStart.scrollX - dx;
+      this.cameras.main.scrollY = this.cameraDragStart.scrollY - dy;
+      return;
+    }
+    this.handleFieldHover(pointer);
   }
 
-  private panFreeCamera(deltaSeconds: number) {
-    const inputX = Number(this.cursors.right.isDown || this.keys.D.isDown) - Number(this.cursors.left.isDown || this.keys.A.isDown);
-    const inputY = Number(this.cursors.down.isDown || this.keys.S.isDown) - Number(this.cursors.up.isDown || this.keys.W.isDown);
+  private handleWorldClick(pointer: Phaser.Input.Pointer) {
+    if (this.skipNextWorldClick) {
+      this.skipNextWorldClick = false;
+      this.cameraDragStart = undefined;
+      return;
+    }
+    if (this.cameraWasDragged) {
+      this.cameraDragStart = undefined;
+      return;
+    }
+    this.cameraDragStart = undefined;
 
-    if (inputX === 0 && inputY === 0) return;
-
-    const pan = new Phaser.Math.Vector2(inputX, inputY).normalize().scale(CAMERA_PAN_SPEED * deltaSeconds);
-    this.setCameraScroll(this.cameras.main.scrollX + pan.x, this.cameras.main.scrollY + pan.y);
-  }
-
-  private setCameraScroll(x: number, y: number) {
-    const camera = this.cameras.main;
-    const maxScrollX = Math.max(0, WORLD_WIDTH - camera.width / camera.zoom);
-    const maxScrollY = Math.max(0, WORLD_HEIGHT - camera.height / camera.zoom);
-
-    camera.setScroll(Phaser.Math.Clamp(x, 0, maxScrollX), Phaser.Math.Clamp(y, 0, maxScrollY));
-  }
-
-  private moveMayaToTask(deltaSeconds: number) {
-    if (!this.activeTravel) return;
-
-    const distance = Phaser.Math.Distance.Between(this.mayaX, this.mayaY, this.activeTravel.targetX, this.activeTravel.targetY);
-
-    if (distance <= TASK_ARRIVAL_DISTANCE) {
-      this.mayaX = this.activeTravel.targetX;
-      this.mayaY = this.activeTravel.targetY;
-      this.maya.setPosition(this.mayaX, this.mayaY);
-      this.maya.playIdle();
-      const task = this.activeTravel.task;
-      this.activeTravel = null;
-      this.startTaskWork(task);
+    const shop = this.normalizedAreaPolygon('shop');
+    if (shop && Phaser.Geom.Polygon.Contains(shop, pointer.worldX, pointer.worldY)) {
+      const worker = this.getSelectedWorker();
+      const target = this.areaWorkPoint('shop') ?? { x: pointer.worldX, y: pointer.worldY };
+      this.moveWorkerToPoint(worker, target.x, target.y).then(() => {
+        worker.status = 'Idle';
+        this.setWorkerAnimation(worker, 'idle');
+        this.updateWorkerVisuals(worker);
+        this.publishState('Bem-vindo à lojinha. Escolha quais sementes comprar.');
+        emitGameEvent('openShop', undefined);
+      });
       return;
     }
 
-    const step = Math.min(MAYA_SPEED * deltaSeconds, distance);
-    const vector = new Phaser.Math.Vector2(this.activeTravel.targetX - this.mayaX, this.activeTravel.targetY - this.mayaY)
-      .normalize()
-      .scale(step);
-    const nextX = Phaser.Math.Clamp(this.mayaX + vector.x, TILE_SIZE / 2, WORLD_WIDTH - TILE_SIZE / 2);
-    const nextY = Phaser.Math.Clamp(this.mayaY + vector.y, TILE_SIZE / 2, WORLD_HEIGHT - TILE_SIZE / 2);
-
-    if (!this.collidesAt(nextX, this.mayaY)) this.mayaX = nextX;
-    if (!this.collidesAt(this.mayaX, nextY)) this.mayaY = nextY;
-
-    this.maya.setPosition(this.mayaX, this.mayaY);
-    this.animationState = 'walk';
-    this.maya.playWalkToward(vector.x, vector.y);
-    this.publishState();
-  }
-
-  private updateActiveWork(deltaSeconds: number) {
-    if (!this.activeWork) return;
-
-    this.activeWork.elapsed += deltaSeconds;
-    this.publishState();
-
-    if (this.activeWork.elapsed < this.activeWork.duration) return;
-
-    const task = this.activeWork.task;
-    this.activeWork = null;
-    const message = this.applyTask(task);
-    this.redrawFields();
-    const nextTask = this.tasks.completeCurrent();
-    this.setMayaAnimation('idle');
-    this.publishState(message);
-    if (nextTask) this.beginTaskTravel(nextTask);
-  }
-
-  private collidesAt(x: number, y: number) {
-    const mayaBounds = this.getMayaBounds(x, y);
-    return this.collisionRects.some((rect) => Phaser.Geom.Intersects.RectangleToRectangle(mayaBounds, rect));
-  }
-
-  private getMayaBounds(x: number, y: number) {
-    return new Phaser.Geom.Rectangle(x - 10, y - 8, 20, 20);
-  }
-
-  private addCollisionRect(x: number, y: number, width: number, height: number) {
-    this.collisionRects.push(new Phaser.Geom.Rectangle(x, y, width, height));
-  }
-
-  private performContextAction() {
-    const tileX = Math.floor(this.mayaX / TILE_SIZE);
-    const tileY = Math.floor(this.mayaY / TILE_SIZE);
-    const field = this.fields.getFieldAt(tileX, tileY) ?? this.fields.getFirstUnlockedField();
-    if (!field) return;
-
-    if (field.state === 'Empty') this.enqueueTask('Prepare Soil');
-    else if (field.state === 'Prepared') this.enqueueTask('Plant Wheat');
-    else if (field.state === 'Ready To Harvest') this.enqueueTask('Harvest Wheat');
-    else this.publishState('That field is still growing.');
-  }
-
-  private enqueueTask(task: TaskType) {
-    const started = this.tasks.enqueue(task);
-    this.publishState(started ? `${task} started.` : `${task} added to queue.`);
-    if (started) this.beginTaskTravel(task);
-  }
-
-  private beginTaskTravel(task: TaskType) {
-    this.activeWork = null;
-    this.activeTravel = {
-      task,
-      ...this.getTaskDestination(task),
-    };
-    this.setCameraMode('followMaya');
-    this.animationState = 'walk';
-    this.maya.playWalkToward(this.activeTravel.targetX - this.mayaX, this.activeTravel.targetY - this.mayaY);
-    this.publishState(`${task} destination selected.`);
-  }
-
-  private getTaskDestination(task: TaskType): Omit<TravelTask, 'task'> {
-    if (task === 'Deliver To Shipping Bin') {
-      return { targetX: tileCenter(LANDMARKS.shippingBin.tileX), targetY: tileCenter(LANDMARKS.shippingBin.tileY + 2) };
+    const hit = this.plotAt(pointer.worldX, pointer.worldY);
+    const field = hit ? this.fields.getFieldById(hit.layout.id) : null;
+    const plot = hit ? this.fields.getPlotById(hit.plotId) : null;
+    if (!field || !plot) {
+      this.moveSelectedWorkerToPoint(pointer.worldX, pointer.worldY);
+      return;
     }
 
-    const field = this.getPreferredFieldForTask(task);
-    return { targetX: tileCenter(field.tileX), targetY: tileCenter(field.tileY) };
-  }
-
-  private getPreferredFieldForTask(task: TaskType) {
-    if (task === 'Prepare Soil') {
-      return this.fields.getFirstFieldWithState(['Empty']) ?? this.fields.getFirstUnlockedField() ?? this.fields.allFields[0];
-    }
-
+    const task = this.taskForFieldState(plot.state);
     if (task === 'Plant Wheat') {
-      return this.fields.getFirstFieldWithState(['Prepared']) ?? this.fields.getFirstUnlockedField() ?? this.fields.allFields[0];
+      emitGameEvent('chooseCrop', plot.id);
+      this.publishState('Escolha qual cultura plantar nesta parcela preparada.');
+      return;
     }
-
-    return this.fields.getFirstFieldWithState(['Ready To Harvest']) ?? this.fields.getFirstUnlockedField() ?? this.fields.allFields[0];
+    if (!task) {
+      this.publishState(this.fieldStateMessage(field.state));
+      return;
+    }
+    const plotTarget = hit ? this.plotCenter(hit.plotId) : null;
+    this.enqueueTask(this.getSelectedWorker(), task, field.tileX, field.tileY, hit?.plotId, plotTarget ?? undefined);
   }
 
-  private startTaskWork(task: TaskType) {
+  private handleFieldHover(pointer: Phaser.Input.Pointer) {
+    const fieldId = this.fieldLayoutAt(pointer.worldX, pointer.worldY)?.id ?? null;
+    if (fieldId === this.hoveredFieldId) return;
+    this.hoveredFieldId = fieldId;
+    this.redrawFields();
+    this.game.canvas.style.cursor = fieldId ? 'pointer' : 'default';
+  }
+
+  private randomPointInArea(areaId: string) {
+    const polygon = this.normalizedAreaPolygon(areaId);
+    if (!polygon) return null;
+    const bounds = Phaser.Geom.Polygon.GetAABB(polygon);
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      const x = Phaser.Math.Between(Math.ceil(bounds.left), Math.floor(bounds.right));
+      const y = Phaser.Math.Between(Math.ceil(bounds.top), Math.floor(bounds.bottom));
+      if (Phaser.Geom.Polygon.Contains(polygon, x, y)) return { x, y };
+    }
+    return { x: bounds.centerX, y: bounds.centerY };
+  }
+
+  private scheduleCowWander() {
+    if (!this.cowSprite) return;
+    const target = this.randomPointInArea('corral');
+    if (!target) return;
+    const distance = Phaser.Math.Distance.Between(this.cowSprite.x, this.cowSprite.y, target.x, target.y);
+    this.tweens.add({
+      targets: this.cowSprite,
+      x: target.x,
+      y: target.y,
+      duration: Phaser.Math.Clamp(distance * 9, 1500, 5200),
+      delay: Phaser.Math.Between(900, 2600),
+      ease: 'Sine.easeInOut',
+      onComplete: () => this.scheduleCowWander(),
+    });
+  }
+
+  private areaWorkPoint(areaId: string) {
+    const area = MAP_AREAS.find((candidate) => candidate.id === areaId);
+    return area ? { x: area.workPoint.x * VIEW_WIDTH, y: area.workPoint.y * VIEW_HEIGHT } : null;
+  }
+
+  private normalizedAreaPolygon(areaId: string) {
+    const area = MAP_AREAS.find((candidate) => candidate.id === areaId);
+    return area ? new Phaser.Geom.Polygon(area.polygon.map((point) => ({ x: point.x * VIEW_WIDTH, y: point.y * VIEW_HEIGHT }))) : null;
+  }
+
+  private isWalkablePoint(x: number, y: number) {
+    const lake = this.normalizedAreaPolygon('lake');
+    if (lake && Phaser.Geom.Polygon.Contains(lake, x, y)) return false;
+    return x >= 0 && y >= 0 && x <= VIEW_WIDTH && y <= VIEW_HEIGHT;
+  }
+
+  private plotCenter(plotId: string) {
+    const match = /^field-(\d+)-plot-(\d+)-(\d+)$/.exec(plotId);
+    if (!match) return null;
+    const fieldId = Number(match[1]);
+    const row = Number(match[2]);
+    const col = Number(match[3]);
+    const layout = FIELD_LAYOUTS.find((candidate) => candidate.id === fieldId);
+    if (!layout) return null;
+    const corners = fieldPolygon(layout, VIEW_WIDTH, VIEW_HEIGHT);
+    if (corners.length < 4) return null;
+    const tl = corners[0];
+    const tr = corners[1];
+    const br = corners[2];
+    const bl = corners[corners.length - 2];
+    const lerp = (a: { x: number; y: number }, b: { x: number; y: number }, t: number) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+    const rowT = (row + 0.5) / 6;
+    const colT = (col + 0.5) / 6;
+    return lerp(lerp(tl, bl, rowT), lerp(tr, br, rowT), colT);
+  }
+
+  private plotAt(x: number, y: number) {
+    const layout = this.fieldLayoutAt(x, y);
+    if (!layout) return null;
+    const corners = fieldPolygon(layout, VIEW_WIDTH, VIEW_HEIGHT);
+    if (corners.length < 4) return null;
+    const tl = corners[0]; const tr = corners[1]; const br = corners[2]; const bl = corners[corners.length - 2];
+    const lerp = (a: { x: number; y: number }, b: { x: number; y: number }, t: number) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+    for (let row = 0; row < 6; row += 1) {
+      for (let col = 0; col < 6; col += 1) {
+        const leftTop = lerp(tl, bl, row / 6); const rightTop = lerp(tr, br, row / 6);
+        const leftBottom = lerp(tl, bl, (row + 1) / 6); const rightBottom = lerp(tr, br, (row + 1) / 6);
+        const p1 = lerp(leftTop, rightTop, col / 6); const p2 = lerp(leftTop, rightTop, (col + 1) / 6);
+        const p3 = lerp(leftBottom, rightBottom, (col + 1) / 6); const p4 = lerp(leftBottom, rightBottom, col / 6);
+        if (Phaser.Geom.Polygon.Contains(new Phaser.Geom.Polygon([p1, p2, p3, p4]), x, y)) return { layout, plotId: 'field-' + layout.id + '-plot-' + row + '-' + col, row, col };
+      }
+    }
+    return null;
+  }
+
+  private fieldLayoutAt(x: number, y: number) {
+    return FIELD_LAYOUTS.find((layout) => Phaser.Geom.Polygon.Contains(new Phaser.Geom.Polygon(fieldPolygon(layout, VIEW_WIDTH, VIEW_HEIGHT)), x, y));
+  }
+
+  private taskForFieldState(state: string): TaskType | null {
+    if (state === 'Raw') return 'Prepare Soil';
+    if (state === 'Prepared') return 'Plant Wheat';
+    if (state === 'Mature') return 'Harvest Wheat';
+    return null;
+  }
+
+  private fieldStateMessage(state: string) {
+    if (state === 'Planted') return 'O trigo foi plantado, mas ainda não cresceu. Clique em “Encerrar dia” para avançar para Growing.';
+    if (state === 'Growing') return 'O trigo ainda está crescendo. Clique em “Encerrar dia” mais uma vez para ficar maduro e poder colher.';
+    if (state === 'Locked') return 'Este campo ainda está bloqueado.';
+    return 'Nenhuma ação disponível para este campo.';
+  }
+
+  private taskUnavailableMessage(task: TaskType) {
+    if (task === 'Prepare Soil' && !this.fields.getFirstPlotWithState('Raw')) return 'Não há campo bruto disponível para preparar.';
+    if (task === 'Plant Wheat' && !this.fields.getFirstPlotWithState('Prepared')) return 'Não há campo preparado para plantar. Prepare o solo primeiro.';
+    if (task === 'Harvest Wheat' && !this.fields.getFirstPlotWithState('Mature')) {
+      if (this.fields.getFirstPlotWithState('Planted')) return 'Ainda não dá para colher: o trigo acabou de ser plantado. Encerre o dia duas vezes para amadurecer.';
+      if (this.fields.getFirstPlotWithState('Growing')) return 'Ainda não dá para colher: o trigo está crescendo. Encerre o dia mais uma vez para amadurecer.';
+      return 'Não há trigo maduro para colher. Plante trigo e avance os dias até ficar maduro.';
+    }
+    if (task === 'Milk Cow' && this.cowMilkedToday) return 'Esta vaca já foi ordenhada hoje. Encerre o dia para ordenhar novamente.';
+    return null;
+  }
+
+  private cropProgressMessage() {
+    if (this.fields.getFirstPlotWithState('Mature')) return 'O trigo está maduro: clique no campo dourado ou use Harvest Wheat para colher.';
+    if (this.fields.getFirstPlotWithState('Growing')) return 'O trigo está crescendo: avance mais um dia antes de colher.';
+    if (this.fields.getFirstPlotWithState('Planted')) return 'O trigo foi plantado: avance dois dias para colher.';
+    return 'Nenhuma plantação em crescimento agora.';
+  }
+
+  private targetForTask(worker: WorkerRuntime, task: TaskType) {
+    if (task === 'Prepare Soil') return this.targetForPlotState('Raw') ?? this.lastPlannedTarget(worker);
+    if (task === 'Plant Wheat') return this.targetForPlotState('Prepared') ?? this.lastPlannedTarget(worker);
+    if (task === 'Harvest Wheat') { this.chooseHarvest(); return this.lastPlannedTarget(worker); }
+    if (task === 'Milk Cow') return { tileX: BARN_TARGET.tileX, tileY: BARN_TARGET.tileY };
+    return { tileX: worker.tileX, tileY: worker.tileY };
+  }
+
+  private targetForPlotState(state: string) {
+    const plot = this.fields.getFirstPlotWithState(state as any);
+    if (!plot) return null;
+    const field = this.fields.getFieldById(plot.fieldId);
+    return field ? { tileX: field.tileX, tileY: field.tileY, targetPlotId: plot.id } : null;
+  }
+
+  private lastPlannedTarget(worker: WorkerRuntime) {
+    const lastQueuedTask = worker.tasks.queue[worker.tasks.queue.length - 1];
+    const task = lastQueuedTask ?? worker.tasks.currentTask;
+    return task ? { tileX: task.targetX, tileY: task.targetY } : { tileX: worker.tileX, tileY: worker.tileY };
+  }
+
+  private chooseHarvest() {
+    if (!this.fields.getFirstPlotWithState('Mature')) { this.publishState('Não há culturas maduras para colher.'); return; }
+    emitGameEvent('chooseHarvest', undefined);
+    this.publishState('Escolha qual parcela madura colher.');
+  }
+
+  private harvestSelectedPlot(plotId: string) {
+    const plot = this.fields.getPlotById(plotId);
+    if (!plot || plot.state !== 'Mature') { this.publishState('Esta parcela ainda não está pronta para colheita.'); return; }
+    const field = this.fields.getFieldById(plot.fieldId);
+    const targetWorld = this.plotCenter(plotId) ?? undefined;
+    if (!field) return;
+    this.enqueueTask(this.getSelectedWorker(), 'Harvest Wheat', field.tileX, field.tileY, plotId, targetWorld);
+  }
+
+  private plantSelectedCrop(selection: { plotId: string; cropId: CropId }) {
+    const plot = this.fields.getPlotById(selection.plotId);
+    if (!plot || plot.state !== 'Prepared') { this.publishState('Esta parcela não está preparada para plantio.'); return; }
+    if (this.economy.inventory.seeds[selection.cropId] <= 0) { this.publishState('Você não tem sementes desta cultura. Visite a lojinha.'); return; }
+    const field = this.fields.getFieldById(plot.fieldId);
+    const targetWorld = this.plotCenter(selection.plotId) ?? undefined;
+    if (!field) return;
+    this.enqueueTask(this.getSelectedWorker(), 'Plant Wheat', field.tileX, field.tileY, selection.plotId, targetWorld, selection.cropId);
+  }
+
+  private enqueueTaskForSelectedWorker(task: TaskType) {
+    const unavailable = this.taskUnavailableMessage(task);
+    if (unavailable) {
+      this.publishState(unavailable);
+      return;
+    }
+    const worker = this.getSelectedWorker();
+    const target = this.targetForTask(worker, task);
+    const targetPlotId = 'targetPlotId' in target && typeof target.targetPlotId === 'string' ? target.targetPlotId : undefined;
+    const targetWorld = targetPlotId ? this.plotCenter(targetPlotId) ?? undefined : undefined;
+    this.enqueueTask(worker, task, target.tileX, target.tileY, targetPlotId, targetWorld);
+  }
+
+  private enqueueTask(worker: WorkerRuntime, taskType: TaskType, targetX: number, targetY: number, targetPlotId?: string, targetWorld?: { x: number; y: number }, cropId?: CropId) {
+    if (taskType === 'Milk Cow') this.showCowAtBarn();
+
+    const task: TaskCommand = { id: this.nextTaskId, type: taskType, targetX, targetY, targetPlotId, targetWorldX: targetWorld?.x, targetWorldY: targetWorld?.y, cropId };
+    this.nextTaskId += 1;
+
+    const started = worker.tasks.enqueue(task);
+    this.updateWorkerVisuals(worker);
+    this.publishState(started ? `${taskType} iniciado para ${worker.name}.` : `${taskType} entrou na fila de ${worker.name}.`);
+
+    if (started) this.runTask(worker, task);
+  }
+
+  private showCowAtBarn() {
+    if (!this.cowSprite) return;
+    this.tweens.killTweensOf(this.cowSprite);
+    this.cowSprite.setVisible(true).setAlpha(1);
+    this.tweens.add({ targets: this.cowSprite, x: BARN_TARGET.x - 54, y: BARN_TARGET.y + 10, duration: 520, ease: 'Sine.easeInOut' });
+  }
+
+  private async runTask(worker: WorkerRuntime, task: TaskCommand) {
+    if (typeof task.targetWorldX === 'number' && typeof task.targetWorldY === 'number') {
+      await this.moveWorkerToPoint(worker, task.targetWorldX, task.targetWorldY);
+    } else if (task.targetPlotId) {
+      const plotTarget = this.plotCenter(task.targetPlotId);
+      if (plotTarget) await this.moveWorkerToPoint(worker, plotTarget.x, plotTarget.y);
+      else await this.moveWorkerTo(worker, task.targetX, task.targetY);
+    } else {
+      await this.moveWorkerTo(worker, task.targetX, task.targetY);
+    }
+
+    worker.status = 'Busy';
     const animation: Record<TaskType, AnimationState> = {
       'Prepare Soil': 'prepare soil',
       'Plant Wheat': 'plant',
       'Harvest Wheat': 'harvest',
-      'Deliver To Shipping Bin': 'deliver',
+      'Milk Cow': 'milk cow',
     };
 
-    this.setCameraMode('free');
-    this.setMayaAnimation(animation[task]);
-    this.activeWork = { task, elapsed: 0, duration: TASK_DURATION };
-    this.publishState(`${task} in progress.`);
+    this.setWorkerAnimation(worker, animation[task.type]);
+    this.updateWorkerVisuals(worker);
+    this.publishState(task.type === 'Milk Cow' ? 'A vaca está na porta do Barn. Produzindo leite...' : undefined);
+
+    this.time.delayedCall(TASK_DURATION, () => {
+      const message = this.applyTask(task);
+      this.redrawFields();
+      const nextTask = worker.tasks.completeCurrent();
+      worker.status = nextTask ? 'Busy' : 'Idle';
+      this.setWorkerAnimation(worker, 'idle');
+      this.updateWorkerVisuals(worker);
+      this.publishState(`${worker.name}: ${message}`);
+      if (nextTask) this.time.delayedCall(120, () => this.runTask(worker, nextTask));
+    });
   }
 
-  private applyTask(task: TaskType) {
-    const tileX = Math.floor(this.mayaX / TILE_SIZE);
-    const tileY = Math.floor(this.mayaY / TILE_SIZE);
-    const field = this.fields.getFieldAt(tileX, tileY) ?? this.fields.getFirstUnlockedField();
-    const fieldX = field?.tileX ?? tileX;
-    const fieldY = field?.tileY ?? tileY;
+  private moveWorkerToPoint(worker: WorkerRuntime, x: number, y: number) {
+    return new Promise<void>((resolve) => {
+      if (Phaser.Math.Distance.Between(worker.sprite.x, worker.sprite.y, x, y) < 4) {
+        resolve();
+        return;
+      }
 
-    if (task === 'Prepare Soil') {
-      return this.fields.prepare(fieldX, fieldY) ? 'Field prepared.' : 'No empty field is available.';
-    }
+      worker.status = 'Moving';
+      this.setWorkerAnimation(worker, 'walk');
+      this.updateWorkerVisuals(worker);
+      this.publishState();
 
-    if (task === 'Plant Wheat') {
-      if (!this.economy.useSeed()) return 'No seeds available. Buy wheat seeds first.';
-      if (this.fields.plant(fieldX, fieldY)) return 'Wheat planted. Wait for it to grow.';
-      this.economy.inventory.seeds += 1;
-      return 'No prepared field is available.';
-    }
-
-    if (task === 'Harvest Wheat') {
-      if (!this.fields.harvest(fieldX, fieldY)) return 'No wheat is ready to harvest.';
-      this.economy.addWheat(WHEAT_HARVEST_YIELD);
-      return `${WHEAT_HARVEST_YIELD} wheat harvested.`;
-    }
-
-    const sale = this.economy.sellAllWheat();
-    if (sale.quantity === 0) return 'No wheat to deliver.';
-    return `Sold ${sale.quantity} wheat at ${sale.unitPrice} coins each. Earned ${sale.totalEarned} coins.`;
+      const distance = Phaser.Math.Distance.Between(worker.sprite.x, worker.sprite.y, x, y);
+      this.tweens.add({
+        targets: worker.sprite,
+        x,
+        y,
+        duration: Phaser.Math.Clamp(distance * 2.2, 180, 1600),
+        ease: 'Sine.easeInOut',
+        onUpdate: () => {
+          this.updateWorkerVisuals(worker, false);
+          this.positionWorkerLabels(worker);
+        },
+        onComplete: () => {
+          worker.worldX = x;
+          worker.worldY = y;
+          worker.tileX = Math.round(x);
+          worker.tileY = Math.round(y);
+          this.positionWorkerLabels(worker);
+          resolve();
+        },
+      });
+    });
   }
 
-  private setMayaAnimation(state: AnimationState) {
-    this.animationState = state;
-    if (state === 'idle') this.maya.playIdle();
-    else if (state !== 'walk') this.maya.playTaskState(state);
+  private moveWorkerTo(worker: WorkerRuntime, tileX: number, tileY: number) {
+    return new Promise<void>((resolve) => {
+      const distance = Math.max(Math.abs(worker.tileX - tileX), Math.abs(worker.tileY - tileY));
+      const targetField = this.fields.getFieldAt(tileX, tileY);
+      const layout = targetField ? FIELD_LAYOUTS.find((candidate) => candidate.id === targetField.id) : null;
+      const isBarnTarget = tileX === BARN_TARGET.tileX && tileY === BARN_TARGET.tileY;
+      const target = isBarnTarget
+        ? { x: BARN_TARGET.x, y: BARN_TARGET.y }
+        : layout ? fieldWorkPoint(layout, VIEW_WIDTH, VIEW_HEIGHT) : { x: this.isoToScreen(tileX, tileY)[0], y: this.isoToScreen(tileX, tileY)[1] };
+
+      this.moveWorkerToPoint(worker, target.x, target.y).then(() => {
+        worker.tileX = tileX;
+        worker.tileY = tileY;
+        resolve();
+      });
+    });
   }
 
-  private loadGame() {
-    try {
-      const raw = window.localStorage.getItem(SAVE_KEY);
-      if (!raw) return;
-      const state = JSON.parse(raw) as Partial<SaveState>;
-      this.economy.load(state.economy);
-      this.fields.load(state.fields);
-      this.tasks.load(state.tasks);
-      this.clock.load(state.clock);
-    } catch {
-      window.localStorage.removeItem(SAVE_KEY);
+  private applyTask(task: TaskCommand) {
+    if (task.type === 'Prepare Soil') {
+      return this.fields.prepare(task.targetPlotId ?? task.targetX, task.targetY) ? 'Solo preparado. Agora plante trigo para transformar terra em produção.' : 'Nenhum campo bruto disponível para preparar.';
     }
+
+    if (task.type === 'Plant Wheat') {
+      const cropId = task.cropId ?? 'wheat';
+      const crop = cropById(cropId);
+      if (!this.economy.useSeed(cropId)) return 'Sem sementes de ' + crop.label + '. Compre sementes na lojinha.';
+      if (this.fields.plant(task.targetPlotId ?? task.targetX, cropId, crop.growthDays)) return crop.label + ' plantado. Crescimento estimado: ' + crop.growthDays + ' dia(s).';
+      this.economy.inventory.seeds[cropId] += 1;
+      return 'Nenhum campo preparado disponível para plantar.';
+    }
+
+    if (task.type === 'Harvest Wheat') {
+      const harvestedCrop = this.fields.harvest(task.targetPlotId ?? task.targetX);
+      if (!harvestedCrop) return this.taskUnavailableMessage('Harvest Wheat') ?? 'Nenhuma cultura madura disponível para colher.';
+      this.economy.addCrop(harvestedCrop, 3);
+      return cropById(harvestedCrop).label + ' colhido: produção virou estoque e o campo voltou ao solo bruto.';
+    }
+
+    if (this.cowMilkedToday) return 'Esta vaca já foi ordenhada hoje. Encerre o dia para ordenhar novamente.';
+    this.cowMilkedToday = true;
+    this.economy.addMilk(1);
+    this.scheduleCowWander();
+    return 'Leite produzido no curral e adicionado ao estoque. A vaca só poderá ser ordenhada novamente amanhã.';
   }
 
-  private saveGame() {
-    const state: SaveState = {
-      economy: this.economy.serialize(),
-      fields: this.fields.serialize(),
-      tasks: this.tasks.serialize(),
-      clock: this.clock.snapshot,
-    };
-    window.localStorage.setItem(SAVE_KEY, JSON.stringify(state));
+  private selectWorker(workerId: string, notify = true) {
+    if (!this.workers.has(workerId)) return;
+    this.selectedWorkerId = workerId;
+    this.workers.forEach((worker) => this.updateWorkerVisuals(worker));
+    const worker = this.getSelectedWorker();
+    this.publishState(notify ? `Trabalhador selecionado: ${worker.name}` : undefined);
+  }
+
+  private centerCameraOnWorker(workerId: string) {
+    const worker = this.workers.get(workerId);
+    if (!worker) return;
+    this.cameras.main.pan(worker.sprite.x, worker.sprite.y, 320, 'Sine.easeInOut', true);
+    this.publishState(`Câmera centralizada em ${worker.name}.`);
+  }
+
+  private sellProduct(product: 'wheat' | 'milk') { this.publishState(this.economy.sell(product)); }
+  private buySeeds(crop: 'wheat' | 'rice' | 'tomato' | 'banana' = 'wheat') { this.publishState(this.economy.buySeeds(crop)); }
+  private nextDay() {
+    this.cowMilkedToday = false;
+    const economyMessage = this.economy.nextDay();
+    const grew = this.fields.advanceDay();
+    this.redrawFields();
+    this.publishState(grew ? `${economyMessage} ${this.cropProgressMessage()}` : `${economyMessage} ${this.cropProgressMessage()}`);
+  }
+  private setRole(role: GameRole) { this.role = role; this.publishState(role === 'admin' ? 'Modo administrador ativado.' : 'Modo jogador ativado.'); }
+  private applyAdminEvent(type: AdminEventType) {
+    if (this.role !== 'admin') { this.publishState('Somente o administrador pode criar eventos.'); return; }
+    this.publishState(this.economy.applyAdminEvent(type));
+  }
+
+  private getSelectedWorker() {
+    return this.workers.get(this.selectedWorkerId) ?? this.workers.get(MAYA_ID)!;
+  }
+
+  private setWorkerAnimation(worker: WorkerRuntime, state: AnimationState) {
+    worker.animationState = state;
+    worker.sprite.play(`maya-${state}`);
+  }
+
+  private updateWorkerVisuals(worker: WorkerRuntime, repositionLabels = true) {
+    const isSelected = worker.id === this.selectedWorkerId;
+    worker.selectionRing.clear();
+    worker.selectionRing.lineStyle(isSelected ? 3 : 1, isSelected ? 0xfff06a : 0x2f6f43, isSelected ? 1 : 0.35);
+    worker.selectionRing.strokeEllipse(worker.sprite.x, worker.sprite.y + 14, 42, 15);
+    worker.selectionRing.fillStyle(0xfff06a, isSelected ? 0.18 : 0);
+    worker.selectionRing.fillEllipse(worker.sprite.x, worker.sprite.y + 14, 42, 15);
+    worker.sprite.setDepth(10 + worker.sprite.y / 1000);
+    worker.nameLabel.setColor(isSelected ? '#fff06a' : '#ffffff');
+    worker.statusLabel.setText(this.statusText(worker));
+    if (repositionLabels) this.positionWorkerLabels(worker);
+  }
+
+  private positionWorkerLabels(worker: WorkerRuntime) {
+    worker.nameLabel.setPosition(worker.sprite.x, worker.sprite.y - 28);
+    worker.statusLabel.setPosition(worker.sprite.x, worker.sprite.y + 18);
+    worker.selectionRing.setPosition(0, 0);
+  }
+
+  private statusText(worker: WorkerRuntime) {
+    const task = worker.tasks.currentTask?.type;
+    return task ? `${worker.status}: ${task}` : worker.status;
   }
 
   private publishState(notification?: string) {
-    if (!this.maya) return;
+    const workers = [...this.workers.values()].map((worker) => this.snapshotWorker(worker));
+    const selectedWorker = workers.find((worker) => worker.id === this.selectedWorkerId) ?? workers[0];
 
-    this.saveGame();
     emitGameEvent('state', {
       economy: { ...this.economy.economy },
       inventory: { ...this.economy.inventory },
-      currentTask: this.tasks.currentTask,
-      taskQueue: [...this.tasks.queue],
+      selectedWorkerId: selectedWorker.id,
+      selectedWorker,
+      workers,
+      currentTask: selectedWorker.currentTask?.type ?? null,
+      taskQueue: selectedWorker.taskQueue.map((task) => task.type),
       fields: this.fields.snapshots,
-      animationState: this.animationState,
-      cameraMode: this.cameraMode,
-      maya: this.maya.getSnapshot(),
-      clock: this.clock.snapshot,
-      taskProgress: {
-        task: this.activeWork?.task ?? null,
-        progress: this.activeWork ? Phaser.Math.Clamp(this.activeWork.elapsed / this.activeWork.duration, 0, 1) : 0,
-      },
-      lastSale: this.economy.lastSale,
-      wheatSeedCost: WHEAT_SEED_COST,
-      wheatPrice: WHEAT_PRICE,
+      animationState: selectedWorker.animationState,
+      role: this.role,
+      rivals: this.economy.rivals.map((rival) => ({ ...rival })),
+      events: this.economy.events.map((event) => ({ ...event })),
     });
 
     if (notification) emitGameEvent('notification', notification);
+  }
+
+  private snapshotWorker(worker: WorkerRuntime): WorkerSnapshot {
+    return {
+      id: worker.id,
+      name: worker.name,
+      position: { x: worker.tileX, y: worker.tileY },
+      status: worker.status,
+      currentTask: worker.tasks.currentTask ? { ...worker.tasks.currentTask } : null,
+      taskQueue: worker.tasks.queue.map((task) => ({ ...task })),
+      animationState: worker.animationState,
+      isSelected: worker.id === this.selectedWorkerId,
+    };
   }
 }

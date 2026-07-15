@@ -1,8 +1,10 @@
-name: Deploy to GitHub Pages
+name: Deploy single-player preview to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - agent/isometric-multiplayer-foundation
   workflow_dispatch:
 
 permissions:
@@ -12,7 +14,7 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -25,11 +27,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - name: Install dependencies
         run: npm install
