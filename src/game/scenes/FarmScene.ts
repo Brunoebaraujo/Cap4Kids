@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { createPixelAssets } from '../assets/createPixelAssets';
 import { FIELD_LAYOUTS, fieldPolygon, fieldWorkPoint, type FieldLayout } from '../data/fieldLayout';
+import { MAP_AREAS } from '../data/mapAreas';
 import { emitGameEvent, gameEvents } from '../eventBus';
 import { EconomySystem } from '../systems/EconomySystem';
 import { FieldSystem } from '../systems/FieldSystem';
@@ -319,7 +320,13 @@ export class FarmScene extends Phaser.Scene {
       this.publishState(`${worker.name} está ocupado. Aguarde a tarefa terminar.`);
       return;
     }
-    this.moveWorkerToPoint(worker, Phaser.Math.Clamp(x, 16, VIEW_WIDTH - 16), Phaser.Math.Clamp(y, 16, VIEW_HEIGHT - 16));
+    const targetX = Phaser.Math.Clamp(x, 16, VIEW_WIDTH - 16);
+    const targetY = Phaser.Math.Clamp(y, 16, VIEW_HEIGHT - 16);
+    if (!this.isWalkablePoint(targetX, targetY)) {
+      this.publishState('Este ponto não é caminhável. Maya ainda não aprendeu a andar sobre a água.');
+      return;
+    }
+    this.moveWorkerToPoint(worker, targetX, targetY);
   }
 
   private readDirection(): Direction | null {
@@ -336,6 +343,7 @@ export class FarmScene extends Phaser.Scene {
     const [dx, dy] = deltas[direction];
     const nextX = Phaser.Math.Clamp(worker.worldX + dx * 42, 16, VIEW_WIDTH - 16);
     const nextY = Phaser.Math.Clamp(worker.worldY + dy * 42, 16, VIEW_HEIGHT - 16);
+    if (!this.isWalkablePoint(nextX, nextY)) return;
     this.moveWorkerToPoint(worker, nextX, nextY).then(() => {
       if (!worker.tasks.currentTask) {
         worker.status = 'Idle';
@@ -408,6 +416,37 @@ export class FarmScene extends Phaser.Scene {
     this.hoveredFieldId = fieldId;
     this.redrawFields();
     this.game.canvas.style.cursor = fieldId ? 'pointer' : 'default';
+  }
+
+  private normalizedAreaPolygon(areaId: string) {
+    const area = MAP_AREAS.find((candidate) => candidate.id === areaId);
+    return area ? new Phaser.Geom.Polygon(area.polygon.map((point) => ({ x: point.x * VIEW_WIDTH, y: point.y * VIEW_HEIGHT }))) : null;
+  }
+
+  private isWalkablePoint(x: number, y: number) {
+    const lake = this.normalizedAreaPolygon('lake');
+    if (lake && Phaser.Geom.Polygon.Contains(lake, x, y)) return false;
+    return x >= 0 && y >= 0 && x <= VIEW_WIDTH && y <= VIEW_HEIGHT;
+  }
+
+  private plotCenter(plotId: string) {
+    const match = /^field-(\d+)-plot-(\d+)-(\d+)$/.exec(plotId);
+    if (!match) return null;
+    const fieldId = Number(match[1]);
+    const row = Number(match[2]);
+    const col = Number(match[3]);
+    const layout = FIELD_LAYOUTS.find((candidate) => candidate.id === fieldId);
+    if (!layout) return null;
+    const corners = fieldPolygon(layout, VIEW_WIDTH, VIEW_HEIGHT);
+    if (corners.length < 4) return null;
+    const tl = corners[0];
+    const tr = corners[1];
+    const br = corners[2];
+    const bl = corners[corners.length - 2];
+    const lerp = (a: { x: number; y: number }, b: { x: number; y: number }, t: number) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+    const rowT = (row + 0.5) / 6;
+    const colT = (col + 0.5) / 6;
+    return lerp(lerp(tl, bl, rowT), lerp(tr, br, rowT), colT);
   }
 
   private plotAt(x: number, y: number) {
@@ -520,7 +559,13 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private async runTask(worker: WorkerRuntime, task: TaskCommand) {
-    await this.moveWorkerTo(worker, task.targetX, task.targetY);
+    if (task.targetPlotId) {
+      const plotTarget = this.plotCenter(task.targetPlotId);
+      if (plotTarget) await this.moveWorkerToPoint(worker, plotTarget.x, plotTarget.y);
+      else await this.moveWorkerTo(worker, task.targetX, task.targetY);
+    } else {
+      await this.moveWorkerTo(worker, task.targetX, task.targetY);
+    }
 
     worker.status = 'Busy';
     const animation: Record<TaskType, AnimationState> = {
