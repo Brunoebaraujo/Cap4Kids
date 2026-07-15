@@ -494,7 +494,8 @@ export class FarmScene extends Phaser.Scene {
     }
     const worker = this.getSelectedWorker();
     const target = this.targetForTask(worker, task);
-    this.enqueueTask(worker, task, target.tileX, target.tileY, 'targetPlotId' in target ? target.targetPlotId : undefined);
+    const targetPlotId = 'targetPlotId' in target && typeof target.targetPlotId === 'string' ? target.targetPlotId : undefined;
+    this.enqueueTask(worker, task, target.tileX, target.tileY, targetPlotId);
   }
 
   private enqueueTask(worker: WorkerRuntime, taskType: TaskType, targetX: number, targetY: number, targetPlotId?: string) {
