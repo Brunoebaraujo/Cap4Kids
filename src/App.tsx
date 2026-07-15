@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import type Phaser from 'phaser';
 import { createGame } from './game/createGame';
 import { gameEvents } from './game/eventBus';
-import type { AdminEventType, GameRole, GameSnapshot, TaskType } from './game/types';
+import { CROPS } from './game/data/crops';
+import type { AdminEventType, CropId, GameRole, GameSnapshot, TaskType } from './game/types';
 
 const initialSnapshot: GameSnapshot = {
   economy: {
@@ -16,8 +17,11 @@ const initialSnapshot: GameSnapshot = {
     day: 1,
   },
   inventory: {
-    seeds: 4,
+    seeds: { wheat: 4, rice: 0, tomato: 0, banana: 0 },
     wheat: 0,
+    rice: 0,
+    tomato: 0,
+    banana: 0,
     milk: 0,
   },
   selectedWorkerId: 'maya',
@@ -60,6 +64,7 @@ function App() {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [notification, setNotification] = useState('Selecione um trabalhador e clique em um campo.');
   const [tutorialDismissed, setTutorialDismissed] = useState(false);
+  const [shopOpen, setShopOpen] = useState(false);
 
   useEffect(() => {
     if (!gameRootRef.current || gameRef.current) return;
@@ -74,13 +79,15 @@ function App() {
   const selectWorker = (workerId: string) => gameEvents.emit('selectWorker', workerId);
   const findWorker = (workerId: string) => gameEvents.emit('findWorker', workerId);
   const sell = (product: 'wheat' | 'milk') => gameEvents.emit('sell', product);
-  const buySeeds = () => gameEvents.emit('buySeeds');
+  const buySeeds = (crop: CropId = 'wheat') => gameEvents.emit('buySeeds', crop);
   const nextDay = () => gameEvents.emit('nextDay');
   const setRole = (role: GameRole) => gameEvents.emit('role', role);
   const triggerEvent = (event: AdminEventType) => gameEvents.emit('adminEvent', event);
 
   useEffect(() => {
     const handleState = (nextSnapshot: GameSnapshot) => setSnapshot(nextSnapshot);
+    const handleOpenShop = () => setShopOpen(true);
+    const handleCloseShop = () => setShopOpen(false);
     const handleNotification = (message: string) => {
       if (message !== 'Selecione um trabalhador e clique no Campo 1 para preparar o solo.' && message !== 'Selecione um trabalhador e clique em um campo.') {
         setTutorialDismissed(true);
@@ -90,10 +97,14 @@ function App() {
 
     gameEvents.on('state', handleState);
     gameEvents.on('notification', handleNotification);
+    gameEvents.on('openShop', handleOpenShop);
+    gameEvents.on('closeShop', handleCloseShop);
 
     return () => {
       gameEvents.off('state', handleState);
       gameEvents.off('notification', handleNotification);
+      gameEvents.off('openShop', handleOpenShop);
+      gameEvents.off('closeShop', handleCloseShop);
     };
   }, []);
 
@@ -135,7 +146,7 @@ function App() {
           <div className="market-grid">
             <button onClick={() => sell('wheat')}><span>Trigo</span><strong>{snapshot.economy.wheatPrice} moedas</strong><small>Vender estoque</small></button>
             <button onClick={() => sell('milk')}><span>Leite</span><strong>{snapshot.economy.milkPrice} moedas</strong><small>Vender estoque</small></button>
-            <button onClick={buySeeds}><span>Sementes</span><strong>Preço variável</strong><small>Comprar 2</small></button>
+            <button onClick={() => setShopOpen(true)}><span>Sementes</span><strong>Na lojinha</strong><small>Comprar insumos</small></button>
           </div>
           <p className="lesson">Preços sinalizam escassez. A inflação reduz o poder de compra; concorrentes reagem ao mercado a cada dia.</p>
         </section>
@@ -148,6 +159,22 @@ function App() {
           </div>
           <small className="prototype-note">Rivais simulados nesta versão; o servidor autoritativo substituirá esta camada.</small>
         </section>
+
+        {shopOpen && <section className="hud-section shop-panel">
+          <h2>Lojinha · Sementes</h2>
+          <p className="lesson">No fluxo final, a compra acontece ao visitar fisicamente a lojinha. Esta janela já será expandida depois com equipamentos e contratação.</p>
+          <div className="shop-grid">
+            {CROPS.map((crop) => (
+              <button key={crop.id} type="button" onClick={() => buySeeds(crop.id)}>
+                <span>{crop.label}</span>
+                <strong>Venda ${crop.saleValueUsd}</strong>
+                <small>Plantar {crop.plantMinutes}min · Crescer {crop.growthDays}d · Colher {crop.harvestMinutes}min</small>
+                <small>Sementes: {snapshot.inventory.seeds[crop.id]}</small>
+              </button>
+            ))}
+          </div>
+          <button type="button" onClick={() => setShopOpen(false)}>Fechar loja</button>
+        </section>}
 
         {snapshot.role === 'admin' && <section className="hud-section admin-panel">
           <p className="eyebrow">Console divino</p>
