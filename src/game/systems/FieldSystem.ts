@@ -9,9 +9,12 @@ export interface FieldRecord {
 
 export class FieldSystem {
   private readonly fields: FieldRecord[] = [
-    { id: 1, tileX: 6, tileY: 5, state: 'Raw' },
-    { id: 2, tileX: 8, tileY: 5, state: 'Locked' },
-    { id: 3, tileX: 6, tileY: 8, state: 'Locked' },
+    { id: 1, tileX: 1, tileY: 1, state: 'Raw' },
+    { id: 2, tileX: 2, tileY: 1, state: 'Locked' },
+    { id: 3, tileX: 3, tileY: 1, state: 'Locked' },
+    { id: 4, tileX: 4, tileY: 1, state: 'Locked' },
+    { id: 5, tileX: 5, tileY: 1, state: 'Locked' },
+    { id: 6, tileX: 6, tileY: 1, state: 'Locked' },
   ];
 
   get snapshots(): FieldSnapshot[] {
