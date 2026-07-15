@@ -7,10 +7,11 @@ export type AnimationState = 'idle' | 'walk' | 'prepare soil' | 'plant' | 'harve
 export type WorkerStatus = 'Idle' | 'Busy' | 'Moving';
 export type GameRole = 'player' | 'admin';
 export type AdminEventType = 'drought' | 'rain' | 'subsidy' | 'inflation' | 'locusts';
+export type CropId = 'wheat' | 'rice' | 'tomato' | 'banana';
 
 // Task targets may include exact world coordinates for per-plot work.
 export interface TaskCommand { id: number; type: TaskType; targetX: number; targetY: number; targetPlotId?: string; targetWorldX?: number; targetWorldY?: number }
-export interface Inventory { seeds: number; wheat: number; milk: number }
+export interface Inventory { seeds: number; wheat: number; rice: number; tomato: number; banana: number; milk: number }
 export interface Economy {
   coins: number;
   debt: number;
@@ -21,7 +22,7 @@ export interface Economy {
   wealthCreated: number;
   day: number;
 }
-export interface PlotSnapshot { id: string; fieldId: number; row: number; col: number; state: FieldState }
+export interface PlotSnapshot { id: string; fieldId: number; row: number; col: number; state: FieldState; cropId?: CropId | null; growthRemainingDays?: number }
 export interface FieldSnapshot { id: number; state: FieldState; plots?: PlotSnapshot[] }
 export interface WorkerSnapshot {
   id: string; name: string; position: { x: number; y: number }; status: WorkerStatus;
@@ -36,5 +37,5 @@ export interface GameSnapshot {
 }
 export interface GameEvents {
   state: GameSnapshot; notification: string; task: TaskType; selectWorker: string; findWorker: string;
-  sell: 'wheat' | 'milk'; buySeeds: undefined; nextDay: undefined; adminEvent: AdminEventType; role: GameRole;
+  sell: CropId | 'milk'; buySeeds: CropId; openShop: undefined; closeShop: undefined; nextDay: undefined; adminEvent: AdminEventType; role: GameRole;
 }
