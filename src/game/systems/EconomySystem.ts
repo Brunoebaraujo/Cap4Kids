@@ -4,6 +4,7 @@ import type { AdminEventType, CropId, Economy, Inventory, RivalSnapshot, WorldEv
 export class EconomySystem {
   readonly economy: Economy = {
     coins: 40, debt: 250, dailyHouseholdCost: 8, inflationRate: 0.02,
+    cropPrices: { wheat: 10, rice: 15, tomato: 20, banana: 30 },
     wheatPrice: 10, milkPrice: 9, wealthCreated: 0, day: 1,
   };
   readonly inventory: Inventory = { seeds: { wheat: 4, rice: 0, tomato: 0, banana: 0 }, wheat: 0, rice: 0, tomato: 0, banana: 0, milk: 0 };
@@ -28,7 +29,7 @@ export class EconomySystem {
   sell(product: CropId | 'milk') {
     const amount = this.inventory[product];
     if (!amount) return 'Você não tem estoque de ' + product + ' para vender.';
-    const price = product === 'milk' ? this.economy.milkPrice : cropById(product).saleValueUsd;
+    const price = product === 'milk' ? this.economy.milkPrice : this.economy.cropPrices[product];
     const revenue = amount * price; this.inventory[product] = 0; this.economy.coins += revenue;
     return 'Venda concluída: ' + amount + ' unidade(s), receita de ' + revenue + ' moedas.';
   }
@@ -53,5 +54,16 @@ export class EconomySystem {
     this.events.unshift({ id: this.nextEventId++, type, title, description, day: this.economy.day });
     return title + ': ' + description;
   }
-  private reprice() { const multiplier = 1 + this.economy.inflationRate; this.economy.wheatPrice = Math.max(2, Math.round(10 * multiplier ** (this.economy.day / 4))); this.economy.milkPrice = Math.max(3, Math.round(9 * multiplier ** (this.economy.day / 4))); }
+  private reprice() {
+    const multiplier = 1 + this.economy.inflationRate;
+    const volatility = { wheat: 2, rice: 3, tomato: 5, banana: 6 } as const;
+    (Object.keys(this.economy.cropPrices) as Array<keyof typeof this.economy.cropPrices>).forEach((crop) => {
+      const base = cropById(crop).saleValueUsd;
+      const drift = Math.round((Math.random() * 2 - 1) * volatility[crop]);
+      const inflation = Math.round(base * (multiplier ** (this.economy.day / 6) - 1));
+      this.economy.cropPrices[crop] = Math.max(1, base + inflation + drift);
+    });
+    this.economy.wheatPrice = this.economy.cropPrices.wheat;
+    this.economy.milkPrice = Math.max(3, Math.round(9 * multiplier ** (this.economy.day / 4) + Math.round(Math.random() * 4 - 2)));
+  }
 }
