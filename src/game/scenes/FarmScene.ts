@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { createPixelAssets } from '../assets/createPixelAssets';
-import { FIELD_LAYOUTS, fieldPolygon, fieldWorkPoint } from '../data/fieldLayout';
+import { FIELD_LAYOUTS, fieldPolygon, fieldWorkPoint, type FieldLayout } from '../data/fieldLayout';
 import { emitGameEvent, gameEvents } from '../eventBus';
 import { EconomySystem } from '../systems/EconomySystem';
 import { FieldSystem } from '../systems/FieldSystem';
@@ -62,6 +62,8 @@ export class FarmScene extends Phaser.Scene {
   private hoveredFieldId: number | null = null;
   private debugFields = false;
   private fieldDebugLabels: Phaser.GameObjects.Text[] = [];
+  private cameraDragStart?: { pointerX: number; pointerY: number; scrollX: number; scrollY: number };
+  private cameraWasDragged = false;
 
   private readonly workers = new Map<string, WorkerRuntime>();
   private readonly fields = new FieldSystem();
@@ -84,8 +86,9 @@ export class FarmScene extends Phaser.Scene {
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.keys = this.input.keyboard!.addKeys('W,A,S,D,G,SPACE,ONE,TWO,THREE,FOUR') as Record<string, Phaser.Input.Keyboard.Key>;
 
+    this.input.on('pointerdown', this.handlePointerDown, this);
     this.input.on('pointerup', this.handleWorldClick, this);
-    this.input.on('pointermove', this.handleFieldHover, this);
+    this.input.on('pointermove', this.handlePointerMove, this);
     gameEvents.on('task', this.enqueueTaskForSelectedWorker, this);
     gameEvents.on('selectWorker', this.selectWorker, this);
     gameEvents.on('findWorker', this.centerCameraOnWorker, this);
@@ -95,8 +98,9 @@ export class FarmScene extends Phaser.Scene {
     gameEvents.on('adminEvent', this.applyAdminEvent, this);
     gameEvents.on('role', this.setRole, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.input.off('pointerdown', this.handlePointerDown, this);
       this.input.off('pointerup', this.handleWorldClick, this);
-      this.input.off('pointermove', this.handleFieldHover, this);
+      this.input.off('pointermove', this.handlePointerMove, this);
       gameEvents.off('task', this.enqueueTaskForSelectedWorker, this);
       gameEvents.off('selectWorker', this.selectWorker, this);
       gameEvents.off('findWorker', this.centerCameraOnWorker, this);
@@ -225,13 +229,48 @@ export class FarmScene extends Phaser.Scene {
       if (!field) return;
       const polygon = new Phaser.Geom.Polygon(fieldPolygon(layout, VIEW_WIDTH, VIEW_HEIGHT));
       const isHovered = this.hoveredFieldId === field.id;
-      const color = field.state === 'Prepared' ? 0x4b2d18 : field.state === 'Planted' ? 0x8a6a31 : field.state === 'Growing' ? 0x4f8d35 : field.state === 'Mature' ? 0xd8a72d : field.state === 'Locked' ? 0x30352e : 0x6f4c2d;
-      const stateAlpha = field.state === 'Raw' ? 0 : field.state === 'Locked' ? 0.05 : 0.34;
-      this.fieldLayer.fillStyle(color, isHovered ? Math.max(stateAlpha, 0.12) : stateAlpha);
+      this.drawPlotStates(layout, isHovered);
       this.fieldLayer.lineStyle(this.debugFields || isHovered ? 2 : 0, field.state === 'Locked' ? 0xb5b0a3 : 0xffd86b, this.debugFields ? 0.8 : isHovered ? 0.9 : 0);
-      this.fieldLayer.fillPoints(polygon.points, true).strokePoints(polygon.points, true);
-      this.drawFieldState(polygon, field.state);
+      this.fieldLayer.strokePoints(polygon.points, true);
       if (this.debugFields) this.drawFieldDebug(layout, polygon, field.state);
+    });
+  }
+
+  private drawPlotStates(layout: FieldLayout, isHovered: boolean) {
+    const field = this.fields.getFieldById(layout.id);
+    if (!field?.plots) return;
+    const corners = fieldPolygon(layout, VIEW_WIDTH, VIEW_HEIGHT);
+    if (corners.length < 4) return;
+    const tl = corners[0];
+    const tr = corners[1];
+    const br = corners[2];
+    const bl = corners[corners.length - 2];
+    const lerp = (a: { x: number; y: number }, b: { x: number; y: number }, t: number) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+
+    field.plots.forEach((plot) => {
+      const rowTop = plot.row / 6;
+      const rowBottom = (plot.row + 1) / 6;
+      const colLeft = plot.col / 6;
+      const colRight = (plot.col + 1) / 6;
+      const leftTop = lerp(tl, bl, rowTop);
+      const rightTop = lerp(tr, br, rowTop);
+      const leftBottom = lerp(tl, bl, rowBottom);
+      const rightBottom = lerp(tr, br, rowBottom);
+      const p1 = lerp(leftTop, rightTop, colLeft);
+      const p2 = lerp(leftTop, rightTop, colRight);
+      const p3 = lerp(leftBottom, rightBottom, colRight);
+      const p4 = lerp(leftBottom, rightBottom, colLeft);
+      const color = plot.state === 'Prepared' ? 0x4b2d18 : plot.state === 'Planted' ? 0x8a6a31 : plot.state === 'Growing' ? 0x4f8d35 : plot.state === 'Mature' ? 0xd8a72d : plot.state === 'Locked' ? 0x30352e : 0x6f4c2d;
+      const alpha = plot.state === 'Raw' ? (isHovered ? 0.08 : 0.02) : plot.state === 'Locked' ? 0.08 : 0.38;
+      this.fieldLayer.fillStyle(color, alpha);
+      this.fieldLayer.lineStyle(1, plot.state === 'Locked' ? 0x777777 : 0xffe28a, this.debugFields || isHovered ? 0.30 : 0.10);
+      this.fieldLayer.fillPoints([p1, p2, p3, p4], true).strokePoints([p1, p2, p3, p4], true);
+      const cx = (p1.x + p2.x + p3.x + p4.x) / 4;
+      const cy = (p1.y + p2.y + p3.y + p4.y) / 4;
+      if (plot.state === 'Prepared') this.fieldLayer.lineStyle(1, 0x2b170e, 0.65).lineBetween(cx - 6, cy + 3, cx + 6, cy - 3);
+      if (plot.state === 'Planted') this.fieldLayer.fillStyle(0x5f9b35, 0.75).fillCircle(cx, cy, 2);
+      if (plot.state === 'Growing') this.fieldLayer.lineStyle(2, 0x6fb842, 0.9).lineBetween(cx, cy + 5, cx, cy - 6);
+      if (plot.state === 'Mature') this.fieldLayer.fillStyle(0xf0c552, 0.95).fillCircle(cx, cy - 3, 3);
     });
   }
 
@@ -318,25 +357,49 @@ export class FarmScene extends Phaser.Scene {
     this.enqueueTask(worker, task, field.tileX, field.tileY);
   }
 
+  private handlePointerDown(pointer: Phaser.Input.Pointer) {
+    this.cameraWasDragged = false;
+    this.cameraDragStart = { pointerX: pointer.x, pointerY: pointer.y, scrollX: this.cameras.main.scrollX, scrollY: this.cameras.main.scrollY };
+  }
+
+  private handlePointerMove(pointer: Phaser.Input.Pointer) {
+    if (pointer.isDown && this.cameraDragStart) {
+      const dx = pointer.x - this.cameraDragStart.pointerX;
+      const dy = pointer.y - this.cameraDragStart.pointerY;
+      if (Math.abs(dx) + Math.abs(dy) > 6) this.cameraWasDragged = true;
+      this.cameras.main.scrollX = this.cameraDragStart.scrollX - dx;
+      this.cameras.main.scrollY = this.cameraDragStart.scrollY - dy;
+      return;
+    }
+    this.handleFieldHover(pointer);
+  }
+
   private handleWorldClick(pointer: Phaser.Input.Pointer) {
     if (this.skipNextWorldClick) {
       this.skipNextWorldClick = false;
+      this.cameraDragStart = undefined;
       return;
     }
+    if (this.cameraWasDragged) {
+      this.cameraDragStart = undefined;
+      return;
+    }
+    this.cameraDragStart = undefined;
 
-    const layout = this.fieldLayoutAt(pointer.worldX, pointer.worldY);
-    const field = layout ? this.fields.getFieldById(layout.id) : null;
-    if (!field) {
+    const hit = this.plotAt(pointer.worldX, pointer.worldY);
+    const field = hit ? this.fields.getFieldById(hit.layout.id) : null;
+    const plot = hit ? this.fields.getPlotById(hit.plotId) : null;
+    if (!field || !plot) {
       this.moveSelectedWorkerToPoint(pointer.worldX, pointer.worldY);
       return;
     }
 
-    const task = this.taskForFieldState(field.state);
+    const task = this.taskForFieldState(plot.state);
     if (!task) {
       this.publishState(this.fieldStateMessage(field.state));
       return;
     }
-    this.enqueueTask(this.getSelectedWorker(), task, field.tileX, field.tileY);
+    this.enqueueTask(this.getSelectedWorker(), task, field.tileX, field.tileY, hit.plotId);
   }
 
   private handleFieldHover(pointer: Phaser.Input.Pointer) {
@@ -345,6 +408,25 @@ export class FarmScene extends Phaser.Scene {
     this.hoveredFieldId = fieldId;
     this.redrawFields();
     this.game.canvas.style.cursor = fieldId ? 'pointer' : 'default';
+  }
+
+  private plotAt(x: number, y: number) {
+    const layout = this.fieldLayoutAt(x, y);
+    if (!layout) return null;
+    const corners = fieldPolygon(layout, VIEW_WIDTH, VIEW_HEIGHT);
+    if (corners.length < 4) return null;
+    const tl = corners[0]; const tr = corners[1]; const br = corners[2]; const bl = corners[corners.length - 2];
+    const lerp = (a: { x: number; y: number }, b: { x: number; y: number }, t: number) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+    for (let row = 0; row < 6; row += 1) {
+      for (let col = 0; col < 6; col += 1) {
+        const leftTop = lerp(tl, bl, row / 6); const rightTop = lerp(tr, br, row / 6);
+        const leftBottom = lerp(tl, bl, (row + 1) / 6); const rightBottom = lerp(tr, br, (row + 1) / 6);
+        const p1 = lerp(leftTop, rightTop, col / 6); const p2 = lerp(leftTop, rightTop, (col + 1) / 6);
+        const p3 = lerp(leftBottom, rightBottom, (col + 1) / 6); const p4 = lerp(leftBottom, rightBottom, col / 6);
+        if (Phaser.Geom.Polygon.Contains(new Phaser.Geom.Polygon([p1, p2, p3, p4]), x, y)) return { layout, plotId: 'field-' + layout.id + '-plot-' + row + '-' + col, row, col };
+      }
+    }
+    return null;
   }
 
   private fieldLayoutAt(x: number, y: number) {
@@ -366,29 +448,29 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private taskUnavailableMessage(task: TaskType) {
-    if (task === 'Prepare Soil' && !this.fields.getFirstFieldWithState('Raw')) return 'Não há campo bruto disponível para preparar.';
-    if (task === 'Plant Wheat' && !this.fields.getFirstFieldWithState('Prepared')) return 'Não há campo preparado para plantar. Prepare o solo primeiro.';
-    if (task === 'Harvest Wheat' && !this.fields.getFirstFieldWithState('Mature')) {
-      if (this.fields.getFirstFieldWithState('Planted')) return 'Ainda não dá para colher: o trigo acabou de ser plantado. Encerre o dia duas vezes para amadurecer.';
-      if (this.fields.getFirstFieldWithState('Growing')) return 'Ainda não dá para colher: o trigo está crescendo. Encerre o dia mais uma vez para amadurecer.';
+    if (task === 'Prepare Soil' && !this.fields.getFirstPlotWithState('Raw')) return 'Não há campo bruto disponível para preparar.';
+    if (task === 'Plant Wheat' && !this.fields.getFirstPlotWithState('Prepared')) return 'Não há campo preparado para plantar. Prepare o solo primeiro.';
+    if (task === 'Harvest Wheat' && !this.fields.getFirstPlotWithState('Mature')) {
+      if (this.fields.getFirstPlotWithState('Planted')) return 'Ainda não dá para colher: o trigo acabou de ser plantado. Encerre o dia duas vezes para amadurecer.';
+      if (this.fields.getFirstPlotWithState('Growing')) return 'Ainda não dá para colher: o trigo está crescendo. Encerre o dia mais uma vez para amadurecer.';
       return 'Não há trigo maduro para colher. Plante trigo e avance os dias até ficar maduro.';
     }
     return null;
   }
 
   private cropProgressMessage() {
-    if (this.fields.getFirstFieldWithState('Mature')) return 'O trigo está maduro: clique no campo dourado ou use Harvest Wheat para colher.';
-    if (this.fields.getFirstFieldWithState('Growing')) return 'O trigo está crescendo: avance mais um dia antes de colher.';
-    if (this.fields.getFirstFieldWithState('Planted')) return 'O trigo foi plantado: avance dois dias para colher.';
+    if (this.fields.getFirstPlotWithState('Mature')) return 'O trigo está maduro: clique no campo dourado ou use Harvest Wheat para colher.';
+    if (this.fields.getFirstPlotWithState('Growing')) return 'O trigo está crescendo: avance mais um dia antes de colher.';
+    if (this.fields.getFirstPlotWithState('Planted')) return 'O trigo foi plantado: avance dois dias para colher.';
     return 'Nenhuma plantação em crescimento agora.';
   }
 
   private targetForTask(worker: WorkerRuntime, task: TaskType) {
     const currentField = this.fields.getFieldAt(worker.tileX, worker.tileY);
     if (currentField && this.taskForFieldState(currentField.state) === task) return currentField;
-    if (task === 'Prepare Soil') return this.fields.getFirstFieldWithState('Raw') ?? this.lastPlannedTarget(worker);
-    if (task === 'Plant Wheat') return this.fields.getFirstFieldWithState('Prepared') ?? this.lastPlannedTarget(worker);
-    if (task === 'Harvest Wheat') return this.fields.getFirstFieldWithState('Mature') ?? this.lastPlannedTarget(worker);
+    if (task === 'Prepare Soil') return this.fields.getFirstPlotWithState('Raw') ?? this.lastPlannedTarget(worker);
+    if (task === 'Plant Wheat') return this.fields.getFirstPlotWithState('Prepared') ?? this.lastPlannedTarget(worker);
+    if (task === 'Harvest Wheat') return this.fields.getFirstPlotWithState('Mature') ?? this.lastPlannedTarget(worker);
     if (task === 'Milk Cow') return { tileX: BARN_TARGET.tileX, tileY: BARN_TARGET.tileY };
     return { tileX: worker.tileX, tileY: worker.tileY };
   }
@@ -410,10 +492,10 @@ export class FarmScene extends Phaser.Scene {
     this.enqueueTask(worker, task, target.tileX, target.tileY);
   }
 
-  private enqueueTask(worker: WorkerRuntime, taskType: TaskType, targetX: number, targetY: number) {
+  private enqueueTask(worker: WorkerRuntime, taskType: TaskType, targetX: number, targetY: number, targetPlotId?: string) {
     if (taskType === 'Milk Cow') this.showCowAtBarn();
 
-    const task: TaskCommand = { id: this.nextTaskId, type: taskType, targetX, targetY };
+    const task: TaskCommand = { id: this.nextTaskId, type: taskType, targetX, targetY, targetPlotId };
     this.nextTaskId += 1;
 
     const started = worker.tasks.enqueue(task);
@@ -513,18 +595,18 @@ export class FarmScene extends Phaser.Scene {
 
   private applyTask(task: TaskCommand) {
     if (task.type === 'Prepare Soil') {
-      return this.fields.prepare(task.targetX, task.targetY) ? 'Solo preparado. Agora plante trigo para transformar terra em produção.' : 'Nenhum campo bruto disponível para preparar.';
+      return this.fields.prepare(task.targetPlotId ?? task.targetX, task.targetY) ? 'Solo preparado. Agora plante trigo para transformar terra em produção.' : 'Nenhum campo bruto disponível para preparar.';
     }
 
     if (task.type === 'Plant Wheat') {
       if (!this.economy.useSeed()) return 'Sem sementes disponíveis. Compre sementes no mercado local.';
-      if (this.fields.plant(task.targetX, task.targetY)) return 'Trigo semeado. Encerre o dia duas vezes: plantado → crescendo → maduro.';
+      if (this.fields.plant(task.targetPlotId ?? task.targetX, task.targetY)) return 'Trigo semeado. Encerre o dia duas vezes: plantado → crescendo → maduro.';
       this.economy.inventory.seeds += 1;
       return 'Nenhum campo preparado disponível para plantar.';
     }
 
     if (task.type === 'Harvest Wheat') {
-      if (!this.fields.harvest(task.targetX, task.targetY)) return this.taskUnavailableMessage('Harvest Wheat') ?? 'Nenhum trigo maduro disponível para colher.';
+      if (!this.fields.harvest(task.targetPlotId ?? task.targetX, task.targetY)) return this.taskUnavailableMessage('Harvest Wheat') ?? 'Nenhum trigo maduro disponível para colher.';
       this.economy.addWheat(3);
       return 'Trigo colhido: produção virou estoque e o campo voltou ao solo bruto.';
     }
