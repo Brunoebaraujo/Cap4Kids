@@ -8,7 +8,7 @@ export type WorkerStatus = 'Idle' | 'Busy' | 'Moving';
 export type GameRole = 'player' | 'admin';
 export type AdminEventType = 'drought' | 'rain' | 'subsidy' | 'inflation' | 'locusts';
 
-export interface TaskCommand { id: number; type: TaskType; targetX: number; targetY: number }
+export interface TaskCommand { id: number; type: TaskType; targetX: number; targetY: number; targetPlotId?: string }
 export interface Inventory { seeds: number; wheat: number; milk: number }
 export interface Economy {
   coins: number;
@@ -20,7 +20,8 @@ export interface Economy {
   wealthCreated: number;
   day: number;
 }
-export interface FieldSnapshot { id: number; state: FieldState }
+export interface PlotSnapshot { id: string; fieldId: number; row: number; col: number; state: FieldState }
+export interface FieldSnapshot { id: number; state: FieldState; plots?: PlotSnapshot[] }
 export interface WorkerSnapshot {
   id: string; name: string; position: { x: number; y: number }; status: WorkerStatus;
   currentTask: TaskCommand | null; taskQueue: TaskCommand[]; animationState: AnimationState; isSelected: boolean;
