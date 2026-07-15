@@ -18,16 +18,21 @@ import {
 
 const WORLD_WIDTH = 20;
 const WORLD_HEIGHT = 13;
-const VIEW_WIDTH = 960;
-const VIEW_HEIGHT = 540;
-const ISO_ORIGIN_X = 480;
-const ISO_ORIGIN_Y = 76;
+const VIEW_WIDTH = 1448;
+const VIEW_HEIGHT = 1086;
+const ISO_ORIGIN_X = 724;
+const ISO_ORIGIN_Y = 260;
 const ISO_HALF_WIDTH = 28;
 const ISO_HALF_HEIGHT = 14;
 const MOVE_DURATION = 150;
 const TASK_DURATION = 650;
 const MAYA_ID = 'maya';
-const BARN_TARGET = { tileX: 3, tileY: 5, x: 196, y: 250 };
+const BARN_TARGET = { tileX: 10, tileY: 10, x: 1035, y: 295 };
+const FARMHOUSE_CAMERA = { x: 520, y: 330 };
+const START_POSITIONS: Record<string, { tileX: number; tileY: number; x: number; y: number }> = {
+  maya: { tileX: 0, tileY: 0, x: 520, y: 365 },
+  'worker-1': { tileX: 0, tileY: 1, x: 1090, y: 530 },
+};
 
 interface WorkerRuntime {
   id: string;
@@ -65,7 +70,7 @@ export class FarmScene extends Phaser.Scene {
   }
 
   preload() {
-    this.load.image('farm-vertical-slice', './assets/world/farm-vertical-slice.webp');
+    this.load.image('farm-world-large', './assets/world/farm-world-large.png');
   }
 
   create() {
@@ -145,11 +150,13 @@ export class FarmScene extends Phaser.Scene {
 
   private createWorld() {
     this.cameras.main.setBackgroundColor('#172316');
-    this.add.image(VIEW_WIDTH / 2, VIEW_HEIGHT / 2, 'farm-vertical-slice').setDisplaySize(VIEW_WIDTH, VIEW_HEIGHT).setDepth(0);
+    this.add.image(VIEW_WIDTH / 2, VIEW_HEIGHT / 2, 'farm-world-large').setDepth(0);
+    this.cameras.main.setBounds(0, 0, VIEW_WIDTH, VIEW_HEIGHT);
+    this.cameras.main.centerOn(FARMHOUSE_CAMERA.x, FARMHOUSE_CAMERA.y);
 
     const vignette = this.add.graphics().setDepth(1);
-    vignette.fillStyle(0x071008, 0.16).fillRect(0, 0, VIEW_WIDTH, 46);
-    vignette.fillStyle(0x071008, 0.12).fillRect(0, VIEW_HEIGHT - 34, VIEW_WIDTH, 34);
+    vignette.fillStyle(0x071008, 0.10).fillRect(0, 0, VIEW_WIDTH, 60);
+    vignette.fillStyle(0x071008, 0.10).fillRect(0, VIEW_HEIGHT - 46, VIEW_WIDTH, 46);
 
     this.fieldLayer = this.add.graphics().setDepth(2);
     this.redrawFields();
@@ -161,7 +168,7 @@ export class FarmScene extends Phaser.Scene {
       .setAlpha(0)
       .setVisible(false);
 
-    this.add.text(16, 14, 'Selecione um trabalhador e clique em um campo.', {
+    this.add.text(24, 20, 'Selecione um trabalhador e clique em um campo.', {
       fontFamily: 'monospace',
       fontSize: '11px',
       color: '#fff8d6',
@@ -175,12 +182,13 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private createWorkers() {
-    this.addWorker(MAYA_ID, 'Maya', 4, 6, undefined);
-    this.addWorker('worker-1', 'Worker 1', 10, 6, 0x89c4ff);
+    this.addWorker(MAYA_ID, 'Maya', 0, 0, undefined);
+    this.addWorker('worker-1', 'Worker 1', 0, 1, 0x89c4ff);
   }
 
   private addWorker(id: string, name: string, tileX: number, tileY: number, tint?: number) {
-    const [x, y] = this.isoToScreen(tileX, tileY);
+    const startPosition = START_POSITIONS[id];
+    const [x, y] = startPosition ? [startPosition.x, startPosition.y] : this.isoToScreen(tileX, tileY);
     const selectionRing = this.add.graphics().setDepth(8);
     const sprite = this.add.sprite(x, y, 'maya', 0).setScale(1.45).setDepth(10).setInteractive({ useHandCursor: true });
     const nameLabel = this.add.text(x, y - 28, name, {
@@ -406,8 +414,8 @@ export class FarmScene extends Phaser.Scene {
     if (!this.cowSprite) return;
     this.cowSprite.setVisible(true);
     this.tweens.killTweensOf(this.cowSprite);
-    this.cowSprite.setPosition(BARN_TARGET.x - 34, BARN_TARGET.y + 6).setAlpha(0.15);
-    this.tweens.add({ targets: this.cowSprite, alpha: 1, y: BARN_TARGET.y + 2, duration: 280, ease: 'Sine.easeOut' });
+    this.cowSprite.setPosition(BARN_TARGET.x - 54, BARN_TARGET.y + 16).setAlpha(0.15);
+    this.tweens.add({ targets: this.cowSprite, alpha: 1, y: BARN_TARGET.y + 10, duration: 280, ease: 'Sine.easeOut' });
   }
 
   private async runTask(worker: WorkerRuntime, task: TaskCommand) {
@@ -510,7 +518,7 @@ export class FarmScene extends Phaser.Scene {
   private centerCameraOnWorker(workerId: string) {
     const worker = this.workers.get(workerId);
     if (!worker) return;
-    this.cameras.main.centerOn(worker.sprite.x, worker.sprite.y);
+    this.cameras.main.pan(worker.sprite.x, worker.sprite.y, 320, 'Sine.easeInOut', true);
     this.publishState(`Câmera centralizada em ${worker.name}.`);
   }
 
