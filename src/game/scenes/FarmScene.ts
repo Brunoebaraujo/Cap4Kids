@@ -706,7 +706,7 @@ export class FarmScene extends Phaser.Scene {
     if (task.type === 'Plant Wheat') {
       if (!this.economy.useSeed()) return 'Sem sementes disponíveis. Compre sementes no mercado local.';
       if (this.fields.plant(task.targetPlotId ?? task.targetX, task.targetY)) return 'Trigo semeado. Encerre o dia duas vezes: plantado → crescendo → maduro.';
-      this.economy.inventory.seeds += 1;
+      this.economy.inventory.seeds.wheat += 1;
       return 'Nenhum campo preparado disponível para plantar.';
     }
 
