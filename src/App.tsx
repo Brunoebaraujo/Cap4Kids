@@ -11,7 +11,8 @@ const initialSnapshot: GameSnapshot = {
     debt: 250,
     dailyHouseholdCost: 8,
     inflationRate: 0.02,
-    wheatPrice: 6,
+    cropPrices: { wheat: 10, rice: 15, tomato: 20, banana: 30 },
+    wheatPrice: 10,
     milkPrice: 9,
     wealthCreated: 0,
     day: 1,
@@ -80,7 +81,7 @@ function App() {
   const requestTask = (task: TaskType) => gameEvents.emit('task', task);
   const selectWorker = (workerId: string) => gameEvents.emit('selectWorker', workerId);
   const findWorker = (workerId: string) => gameEvents.emit('findWorker', workerId);
-  const sell = (product: 'wheat' | 'milk') => gameEvents.emit('sell', product);
+  const sell = (product: CropId | 'milk') => gameEvents.emit('sell', product);
   const buySeeds = (crop: CropId = 'wheat') => gameEvents.emit('buySeeds', crop);
   const nextDay = () => gameEvents.emit('nextDay');
   const setRole = (role: GameRole) => gameEvents.emit('role', role);
