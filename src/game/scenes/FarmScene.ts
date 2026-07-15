@@ -399,7 +399,7 @@ export class FarmScene extends Phaser.Scene {
       this.publishState(this.fieldStateMessage(field.state));
       return;
     }
-    this.enqueueTask(this.getSelectedWorker(), task, field.tileX, field.tileY, hit.plotId);
+    this.enqueueTask(this.getSelectedWorker(), task, field.tileX, field.tileY, hit?.plotId);
   }
 
   private handleFieldHover(pointer: Phaser.Input.Pointer) {
@@ -466,13 +466,18 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private targetForTask(worker: WorkerRuntime, task: TaskType) {
-    const currentField = this.fields.getFieldAt(worker.tileX, worker.tileY);
-    if (currentField && this.taskForFieldState(currentField.state) === task) return currentField;
-    if (task === 'Prepare Soil') return this.fields.getFirstPlotWithState('Raw') ?? this.lastPlannedTarget(worker);
-    if (task === 'Plant Wheat') return this.fields.getFirstPlotWithState('Prepared') ?? this.lastPlannedTarget(worker);
-    if (task === 'Harvest Wheat') return this.fields.getFirstPlotWithState('Mature') ?? this.lastPlannedTarget(worker);
+    if (task === 'Prepare Soil') return this.targetForPlotState('Raw') ?? this.lastPlannedTarget(worker);
+    if (task === 'Plant Wheat') return this.targetForPlotState('Prepared') ?? this.lastPlannedTarget(worker);
+    if (task === 'Harvest Wheat') return this.targetForPlotState('Mature') ?? this.lastPlannedTarget(worker);
     if (task === 'Milk Cow') return { tileX: BARN_TARGET.tileX, tileY: BARN_TARGET.tileY };
     return { tileX: worker.tileX, tileY: worker.tileY };
+  }
+
+  private targetForPlotState(state: string) {
+    const plot = this.fields.getFirstPlotWithState(state as any);
+    if (!plot) return null;
+    const field = this.fields.getFieldById(plot.fieldId);
+    return field ? { tileX: field.tileX, tileY: field.tileY, targetPlotId: plot.id } : null;
   }
 
   private lastPlannedTarget(worker: WorkerRuntime) {
@@ -489,7 +494,7 @@ export class FarmScene extends Phaser.Scene {
     }
     const worker = this.getSelectedWorker();
     const target = this.targetForTask(worker, task);
-    this.enqueueTask(worker, task, target.tileX, target.tileY);
+    this.enqueueTask(worker, task, target.tileX, target.tileY, 'targetPlotId' in target ? target.targetPlotId : undefined);
   }
 
   private enqueueTask(worker: WorkerRuntime, taskType: TaskType, targetX: number, targetY: number, targetPlotId?: string) {
