@@ -407,7 +407,8 @@ export class FarmScene extends Phaser.Scene {
       this.publishState(this.fieldStateMessage(field.state));
       return;
     }
-    this.enqueueTask(this.getSelectedWorker(), task, field.tileX, field.tileY, hit?.plotId);
+    const plotTarget = hit ? this.plotCenter(hit.plotId) : null;
+    this.enqueueTask(this.getSelectedWorker(), task, field.tileX, field.tileY, hit?.plotId, plotTarget ?? undefined);
   }
 
   private handleFieldHover(pointer: Phaser.Input.Pointer) {
@@ -534,13 +535,14 @@ export class FarmScene extends Phaser.Scene {
     const worker = this.getSelectedWorker();
     const target = this.targetForTask(worker, task);
     const targetPlotId = 'targetPlotId' in target && typeof target.targetPlotId === 'string' ? target.targetPlotId : undefined;
-    this.enqueueTask(worker, task, target.tileX, target.tileY, targetPlotId);
+    const targetWorld = targetPlotId ? this.plotCenter(targetPlotId) ?? undefined : undefined;
+    this.enqueueTask(worker, task, target.tileX, target.tileY, targetPlotId, targetWorld);
   }
 
-  private enqueueTask(worker: WorkerRuntime, taskType: TaskType, targetX: number, targetY: number, targetPlotId?: string) {
+  private enqueueTask(worker: WorkerRuntime, taskType: TaskType, targetX: number, targetY: number, targetPlotId?: string, targetWorld?: { x: number; y: number }) {
     if (taskType === 'Milk Cow') this.showCowAtBarn();
 
-    const task: TaskCommand = { id: this.nextTaskId, type: taskType, targetX, targetY, targetPlotId };
+    const task: TaskCommand = { id: this.nextTaskId, type: taskType, targetX, targetY, targetPlotId, targetWorldX: targetWorld?.x, targetWorldY: targetWorld?.y };
     this.nextTaskId += 1;
 
     const started = worker.tasks.enqueue(task);
@@ -559,7 +561,9 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private async runTask(worker: WorkerRuntime, task: TaskCommand) {
-    if (task.targetPlotId) {
+    if (typeof task.targetWorldX === 'number' && typeof task.targetWorldY === 'number') {
+      await this.moveWorkerToPoint(worker, task.targetWorldX, task.targetWorldY);
+    } else if (task.targetPlotId) {
       const plotTarget = this.plotCenter(task.targetPlotId);
       if (plotTarget) await this.moveWorkerToPoint(worker, plotTarget.x, plotTarget.y);
       else await this.moveWorkerTo(worker, task.targetX, task.targetY);
