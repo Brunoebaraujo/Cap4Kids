@@ -6,7 +6,6 @@ import { EconomySystem } from '../systems/EconomySystem';
 import { FieldSystem } from '../systems/FieldSystem';
 import { TaskSystem } from '../systems/TaskSystem';
 import {
-  TILE_SIZE,
   type AnimationState,
   type AdminEventType,
   type GameRole,
@@ -28,16 +27,7 @@ const ISO_HALF_HEIGHT = 14;
 const MOVE_DURATION = 150;
 const TASK_DURATION = 650;
 const MAYA_ID = 'maya';
-const TILE_INDEX = {
-  grass: 0,
-  dirtPath: 1,
-  fieldHarvested: 2,
-  fieldPrepared: 3,
-  fieldPlanted: 4,
-  fieldLocked: 5,
-  fence: 6,
-  water: 7,
-} as const;
+const BARN_TARGET = { tileX: 3, tileY: 5, x: 196, y: 250 };
 
 interface WorkerRuntime {
   id: string;
@@ -57,6 +47,7 @@ export class FarmScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
   private fieldLayer!: Phaser.GameObjects.Graphics;
+  private cowSprite?: Phaser.GameObjects.Image;
   private selectedWorkerId = MAYA_ID;
   private nextTaskId = 1;
   private role: GameRole = 'player';
@@ -147,29 +138,28 @@ export class FarmScene extends Phaser.Scene {
     ];
 
     animationMap.forEach(([key, frame]) => {
-      if (this.anims.exists(`maya-${key}`)) {
-        return;
-      }
-
-      this.anims.create({
-        key: `maya-${key}`,
-        frames: [{ key: 'maya', frame }],
-        frameRate: 1,
-      });
+      if (this.anims.exists(`maya-${key}`)) return;
+      this.anims.create({ key: `maya-${key}`, frames: [{ key: 'maya', frame }], frameRate: 1 });
     });
   }
 
   private createWorld() {
     this.cameras.main.setBackgroundColor('#172316');
-    this.add.image(VIEW_WIDTH / 2, VIEW_HEIGHT / 2, 'farm-vertical-slice')
-      .setDisplaySize(VIEW_WIDTH, VIEW_HEIGHT)
-      .setDepth(0);
+    this.add.image(VIEW_WIDTH / 2, VIEW_HEIGHT / 2, 'farm-vertical-slice').setDisplaySize(VIEW_WIDTH, VIEW_HEIGHT).setDepth(0);
 
     const vignette = this.add.graphics().setDepth(1);
     vignette.fillStyle(0x071008, 0.16).fillRect(0, 0, VIEW_WIDTH, 46);
     vignette.fillStyle(0x071008, 0.12).fillRect(0, VIEW_HEIGHT - 34, VIEW_WIDTH, 34);
+
     this.fieldLayer = this.add.graphics().setDepth(2);
     this.redrawFields();
+
+    this.cowSprite = this.add.image(BARN_TARGET.x - 34, BARN_TARGET.y + 6, 'cow-placeholder')
+      .setOrigin(0.5, 1)
+      .setScale(1.25)
+      .setDepth(9)
+      .setAlpha(0)
+      .setVisible(false);
 
     this.add.text(16, 14, 'Selecione um trabalhador e clique em um campo.', {
       fontFamily: 'monospace',
@@ -184,18 +174,6 @@ export class FarmScene extends Phaser.Scene {
     return [ISO_ORIGIN_X + (tileX - tileY) * ISO_HALF_WIDTH, ISO_ORIGIN_Y + (tileX + tileY) * ISO_HALF_HEIGHT];
   }
 
-  private screenToIso(screenX: number, screenY: number): [number, number] {
-    const a = (screenX - ISO_ORIGIN_X) / ISO_HALF_WIDTH;
-    const b = (screenY - ISO_ORIGIN_Y) / ISO_HALF_HEIGHT;
-    return [Math.round((a + b) / 2), Math.round((b - a) / 2)];
-  }
-
-  private drawDiamond(graphics: Phaser.GameObjects.Graphics, x: number, y: number, fill: number, stroke: number) {
-    graphics.fillStyle(fill, 1).lineStyle(1, stroke, .5);
-    graphics.beginPath().moveTo(x, y - ISO_HALF_HEIGHT).lineTo(x + ISO_HALF_WIDTH, y).lineTo(x, y + ISO_HALF_HEIGHT).lineTo(x - ISO_HALF_WIDTH, y).closePath();
-    graphics.fillPath().strokePath();
-  }
-
   private createWorkers() {
     this.addWorker(MAYA_ID, 'Maya', 4, 6, undefined);
     this.addWorker('worker-1', 'Worker 1', 10, 6, 0x89c4ff);
@@ -206,24 +184,13 @@ export class FarmScene extends Phaser.Scene {
     const selectionRing = this.add.graphics().setDepth(8);
     const sprite = this.add.sprite(x, y, 'maya', 0).setScale(1.45).setDepth(10).setInteractive({ useHandCursor: true });
     const nameLabel = this.add.text(x, y - 28, name, {
-      fontFamily: 'monospace',
-      fontSize: '10px',
-      color: '#ffffff',
-      backgroundColor: '#1d2418',
-      padding: { x: 3, y: 1 },
+      fontFamily: 'monospace', fontSize: '10px', color: '#ffffff', backgroundColor: '#1d2418', padding: { x: 3, y: 1 },
     }).setOrigin(0.5).setDepth(12);
     const statusLabel = this.add.text(x, y + 18, 'Idle', {
-      fontFamily: 'monospace',
-      fontSize: '9px',
-      color: '#ffe4a1',
-      backgroundColor: '#2d241a',
-      padding: { x: 3, y: 1 },
+      fontFamily: 'monospace', fontSize: '9px', color: '#ffe4a1', backgroundColor: '#2d241a', padding: { x: 3, y: 1 },
     }).setOrigin(0.5).setDepth(12);
 
-    if (tint) {
-      sprite.setTint(tint);
-    }
-
+    if (tint) sprite.setTint(tint);
     sprite.play('maya-idle');
     sprite.on('pointerdown', () => {
       this.skipNextWorldClick = true;
@@ -231,26 +198,11 @@ export class FarmScene extends Phaser.Scene {
     });
 
     const worker: WorkerRuntime = {
-      id,
-      name,
-      tileX,
-      tileY,
-      sprite,
-      selectionRing,
-      nameLabel,
-      statusLabel,
-      tasks: new TaskSystem(),
-      status: 'Idle',
-      animationState: 'idle',
+      id, name, tileX, tileY, sprite, selectionRing, nameLabel, statusLabel,
+      tasks: new TaskSystem(), status: 'Idle', animationState: 'idle',
     };
     this.workers.set(id, worker);
     this.updateWorkerVisuals(worker);
-  }
-
-  private tileIndexForBaseTile(x: number, y: number) {
-    if (x === 0 || y === 0 || x === WORLD_WIDTH - 1 || y === WORLD_HEIGHT - 1) return TILE_INDEX.fence;
-    if (y === 7 || (x > 2 && x < 11 && y === 6)) return TILE_INDEX.dirtPath;
-    return TILE_INDEX.grass;
   }
 
   private redrawFields() {
@@ -287,8 +239,8 @@ export class FarmScene extends Phaser.Scene {
   private drawFieldState(polygon: Phaser.Geom.Polygon, state: string) {
     if (state === 'Raw' || state === 'Locked') return;
     const bounds = Phaser.Geom.Polygon.GetAABB(polygon);
-    const rowGap = state === 'Prepared' ? 11 : 14;
-    const columnGap = state === 'Prepared' ? 18 : 15;
+    const rowGap = state === 'Prepared' ? 11 : state === 'Mature' ? 12 : 14;
+    const columnGap = state === 'Prepared' ? 18 : state === 'Mature' ? 12 : 15;
 
     for (let y = bounds.top + 10; y < bounds.bottom - 8; y += rowGap) {
       for (let x = bounds.left + 10; x < bounds.right - 8; x += columnGap) {
@@ -300,23 +252,16 @@ export class FarmScene extends Phaser.Scene {
           this.fieldLayer.fillStyle(0xe1c16a, 0.9).fillCircle(x, y, 2);
           this.fieldLayer.fillStyle(0x5f9b35, 0.55).fillCircle(x + 3, y - 2, 1.5);
         } else if (state === 'Growing') {
-          this.fieldLayer.lineStyle(2, 0x6fb842, 0.92).lineBetween(x, y + 5, x, y - 7);
-          this.fieldLayer.lineStyle(1, 0xb3d96a, 0.82).lineBetween(x, y - 1, x + 5, y - 5);
-          this.fieldLayer.lineStyle(1, 0x4f8d35, 0.72).lineBetween(x, y, x - 4, y - 3);
+          this.fieldLayer.lineStyle(3, 0x6fb842, 0.95).lineBetween(x, y + 6, x, y - 9);
+          this.fieldLayer.lineStyle(2, 0xb3d96a, 0.86).lineBetween(x, y - 1, x + 6, y - 6);
+          this.fieldLayer.lineStyle(2, 0x4f8d35, 0.78).lineBetween(x, y, x - 5, y - 4);
         } else if (state === 'Mature') {
-          this.fieldLayer.lineStyle(2, 0xd8aa36, 0.95).lineBetween(x, y + 6, x, y - 8);
-          this.fieldLayer.lineStyle(1, 0xf2d36b, 0.9).lineBetween(x - 3, y - 4, x + 3, y - 9);
-          this.fieldLayer.fillStyle(0xf0c552, 0.96).fillCircle(x, y - 9, 2.3);
+          this.fieldLayer.lineStyle(3, 0xd8aa36, 0.98).lineBetween(x, y + 7, x, y - 10);
+          this.fieldLayer.lineStyle(2, 0xf2d36b, 0.94).lineBetween(x - 4, y - 5, x + 4, y - 11);
+          this.fieldLayer.fillStyle(0xf0c552, 0.98).fillCircle(x, y - 10, 2.8);
         }
       }
     }
-  }
-
-  private tileIndexForField(state: string) {
-    if (state === 'Prepared') return TILE_INDEX.fieldPrepared;
-    if (state === 'Planted') return TILE_INDEX.fieldPlanted;
-    if (state === 'Locked') return TILE_INDEX.fieldLocked;
-    return TILE_INDEX.fieldHarvested;
   }
 
   private readDirection(): Direction | null {
@@ -328,30 +273,13 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private moveWorkerByInput(worker: WorkerRuntime, direction: Direction) {
-    if (worker.status === 'Moving') {
-      return;
-    }
-
-    const deltas: Record<Direction, [number, number]> = {
-      down: [0, 1],
-      up: [0, -1],
-      left: [-1, 0],
-      right: [1, 0],
-    };
-
+    if (worker.status === 'Moving') return;
+    const deltas: Record<Direction, [number, number]> = { down: [0, 1], up: [0, -1], left: [-1, 0], right: [1, 0] };
     const [dx, dy] = deltas[direction];
     const nextX = Phaser.Math.Clamp(worker.tileX + dx, 1, WORLD_WIDTH - 2);
     const nextY = Phaser.Math.Clamp(worker.tileY + dy, 1, WORLD_HEIGHT - 2);
-
-    if (nextX === worker.tileX && nextY === worker.tileY) {
-      return;
-    }
-
-    this.moveWorkerByInputTo(worker, nextX, nextY);
-  }
-
-  private moveWorkerByInputTo(worker: WorkerRuntime, tileX: number, tileY: number) {
-    this.moveWorkerTo(worker, tileX, tileY).then(() => {
+    if (nextX === worker.tileX && nextY === worker.tileY) return;
+    this.moveWorkerTo(worker, nextX, nextY).then(() => {
       if (!worker.tasks.currentTask) {
         worker.status = 'Idle';
         this.setWorkerAnimation(worker, 'idle');
@@ -363,15 +291,12 @@ export class FarmScene extends Phaser.Scene {
 
   private performContextAction(worker: WorkerRuntime) {
     const field = this.fields.getFieldAt(worker.tileX, worker.tileY) ?? this.fields.getFirstUnlockedField();
-
     if (!field) return;
-
     const task = this.taskForFieldState(field.state);
     if (!task) {
       this.publishState(this.fieldStateMessage(field.state));
       return;
     }
-
     this.enqueueTask(worker, task, field.tileX, field.tileY);
   }
 
@@ -383,17 +308,13 @@ export class FarmScene extends Phaser.Scene {
 
     const layout = this.fieldLayoutAt(pointer.worldX, pointer.worldY);
     const field = layout ? this.fields.getFieldById(layout.id) : null;
-
-    if (!field) {
-      return;
-    }
+    if (!field) return;
 
     const task = this.taskForFieldState(field.state);
     if (!task) {
       this.publishState(this.fieldStateMessage(field.state));
       return;
     }
-
     this.enqueueTask(this.getSelectedWorker(), task, field.tileX, field.tileY);
   }
 
@@ -417,62 +338,76 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private fieldStateMessage(state: string) {
-    if (state === 'Planted') return 'Sementes plantadas. Encerre o dia para iniciar o crescimento.';
-    if (state === 'Growing') return 'O trigo ainda está crescendo. Avance mais um dia.';
+    if (state === 'Planted') return 'O trigo foi plantado, mas ainda não cresceu. Clique em “Encerrar dia” para avançar para Growing.';
+    if (state === 'Growing') return 'O trigo ainda está crescendo. Clique em “Encerrar dia” mais uma vez para ficar maduro e poder colher.';
     if (state === 'Locked') return 'Este campo ainda está bloqueado.';
     return 'Nenhuma ação disponível para este campo.';
   }
 
+  private taskUnavailableMessage(task: TaskType) {
+    if (task === 'Prepare Soil' && !this.fields.getFirstFieldWithState('Raw')) return 'Não há campo bruto disponível para preparar.';
+    if (task === 'Plant Wheat' && !this.fields.getFirstFieldWithState('Prepared')) return 'Não há campo preparado para plantar. Prepare o solo primeiro.';
+    if (task === 'Harvest Wheat' && !this.fields.getFirstFieldWithState('Mature')) {
+      if (this.fields.getFirstFieldWithState('Planted')) return 'Ainda não dá para colher: o trigo acabou de ser plantado. Encerre o dia duas vezes para amadurecer.';
+      if (this.fields.getFirstFieldWithState('Growing')) return 'Ainda não dá para colher: o trigo está crescendo. Encerre o dia mais uma vez para amadurecer.';
+      return 'Não há trigo maduro para colher. Plante trigo e avance os dias até ficar maduro.';
+    }
+    return null;
+  }
+
+  private cropProgressMessage() {
+    if (this.fields.getFirstFieldWithState('Mature')) return 'O trigo está maduro: clique no campo dourado ou use Harvest Wheat para colher.';
+    if (this.fields.getFirstFieldWithState('Growing')) return 'O trigo está crescendo: avance mais um dia antes de colher.';
+    if (this.fields.getFirstFieldWithState('Planted')) return 'O trigo foi plantado: avance dois dias para colher.';
+    return 'Nenhuma plantação em crescimento agora.';
+  }
+
   private targetForTask(worker: WorkerRuntime, task: TaskType) {
     const currentField = this.fields.getFieldAt(worker.tileX, worker.tileY);
-    if (currentField && this.taskForFieldState(currentField.state) === task) {
-      return currentField;
-    }
-
-    if (task === 'Prepare Soil') {
-      return this.fields.getFirstFieldWithState('Raw') ?? this.lastPlannedTarget(worker);
-    }
-
-    if (task === 'Plant Wheat') {
-      return this.fields.getFirstFieldWithState('Prepared') ?? this.lastPlannedTarget(worker);
-    }
-
-    if (task === 'Harvest Wheat') {
-      return this.fields.getFirstFieldWithState('Mature') ?? this.lastPlannedTarget(worker);
-    }
-
+    if (currentField && this.taskForFieldState(currentField.state) === task) return currentField;
+    if (task === 'Prepare Soil') return this.fields.getFirstFieldWithState('Raw') ?? this.lastPlannedTarget(worker);
+    if (task === 'Plant Wheat') return this.fields.getFirstFieldWithState('Prepared') ?? this.lastPlannedTarget(worker);
+    if (task === 'Harvest Wheat') return this.fields.getFirstFieldWithState('Mature') ?? this.lastPlannedTarget(worker);
+    if (task === 'Milk Cow') return { tileX: BARN_TARGET.tileX, tileY: BARN_TARGET.tileY };
     return { tileX: worker.tileX, tileY: worker.tileY };
   }
 
   private lastPlannedTarget(worker: WorkerRuntime) {
     const lastQueuedTask = worker.tasks.queue[worker.tasks.queue.length - 1];
     const task = lastQueuedTask ?? worker.tasks.currentTask;
-
     return task ? { tileX: task.targetX, tileY: task.targetY } : { tileX: worker.tileX, tileY: worker.tileY };
   }
 
   private enqueueTaskForSelectedWorker(task: TaskType) {
+    const unavailable = this.taskUnavailableMessage(task);
+    if (unavailable) {
+      this.publishState(unavailable);
+      return;
+    }
     const worker = this.getSelectedWorker();
     const target = this.targetForTask(worker, task);
     this.enqueueTask(worker, task, target.tileX, target.tileY);
   }
 
   private enqueueTask(worker: WorkerRuntime, taskType: TaskType, targetX: number, targetY: number) {
-    const task: TaskCommand = {
-      id: this.nextTaskId,
-      type: taskType,
-      targetX,
-      targetY,
-    };
+    if (taskType === 'Milk Cow') this.showCowAtBarn();
+
+    const task: TaskCommand = { id: this.nextTaskId, type: taskType, targetX, targetY };
     this.nextTaskId += 1;
 
     const started = worker.tasks.enqueue(task);
     this.updateWorkerVisuals(worker);
     this.publishState(started ? `${taskType} iniciado para ${worker.name}.` : `${taskType} entrou na fila de ${worker.name}.`);
 
-    if (started) {
-      this.runTask(worker, task);
-    }
+    if (started) this.runTask(worker, task);
+  }
+
+  private showCowAtBarn() {
+    if (!this.cowSprite) return;
+    this.cowSprite.setVisible(true);
+    this.tweens.killTweensOf(this.cowSprite);
+    this.cowSprite.setPosition(BARN_TARGET.x - 34, BARN_TARGET.y + 6).setAlpha(0.15);
+    this.tweens.add({ targets: this.cowSprite, alpha: 1, y: BARN_TARGET.y + 2, duration: 280, ease: 'Sine.easeOut' });
   }
 
   private async runTask(worker: WorkerRuntime, task: TaskCommand) {
@@ -488,7 +423,7 @@ export class FarmScene extends Phaser.Scene {
 
     this.setWorkerAnimation(worker, animation[task.type]);
     this.updateWorkerVisuals(worker);
-    this.publishState();
+    this.publishState(task.type === 'Milk Cow' ? 'A vaca está na porta do Barn. Produzindo leite...' : undefined);
 
     this.time.delayedCall(TASK_DURATION, () => {
       const message = this.applyTask(task);
@@ -498,10 +433,7 @@ export class FarmScene extends Phaser.Scene {
       this.setWorkerAnimation(worker, 'idle');
       this.updateWorkerVisuals(worker);
       this.publishState(`${worker.name}: ${message}`);
-
-      if (nextTask) {
-        this.time.delayedCall(120, () => this.runTask(worker, nextTask));
-      }
+      if (nextTask) this.time.delayedCall(120, () => this.runTask(worker, nextTask));
     });
   }
 
@@ -520,7 +452,11 @@ export class FarmScene extends Phaser.Scene {
       const distance = Math.max(Math.abs(worker.tileX - tileX), Math.abs(worker.tileY - tileY));
       const targetField = this.fields.getFieldAt(tileX, tileY);
       const layout = targetField ? FIELD_LAYOUTS.find((candidate) => candidate.id === targetField.id) : null;
-      const target = layout ? fieldWorkPoint(layout, VIEW_WIDTH, VIEW_HEIGHT) : { x: this.isoToScreen(tileX, tileY)[0], y: this.isoToScreen(tileX, tileY)[1] };
+      const isBarnTarget = tileX === BARN_TARGET.tileX && tileY === BARN_TARGET.tileY;
+      const target = isBarnTarget
+        ? { x: BARN_TARGET.x, y: BARN_TARGET.y }
+        : layout ? fieldWorkPoint(layout, VIEW_WIDTH, VIEW_HEIGHT) : { x: this.isoToScreen(tileX, tileY)[0], y: this.isoToScreen(tileX, tileY)[1] };
+
       this.tweens.add({
         targets: worker.sprite,
         x: target.x,
@@ -548,26 +484,23 @@ export class FarmScene extends Phaser.Scene {
 
     if (task.type === 'Plant Wheat') {
       if (!this.economy.useSeed()) return 'Sem sementes disponíveis. Compre sementes no mercado local.';
-      if (this.fields.plant(task.targetX, task.targetY)) return 'Trigo semeado. Encerre o dia para ele crescer.';
+      if (this.fields.plant(task.targetX, task.targetY)) return 'Trigo semeado. Encerre o dia duas vezes: plantado → crescendo → maduro.';
       this.economy.inventory.seeds += 1;
       return 'Nenhum campo preparado disponível para plantar.';
     }
 
     if (task.type === 'Harvest Wheat') {
-      if (!this.fields.harvest(task.targetX, task.targetY)) return 'Nenhum trigo maduro disponível para colher.';
+      if (!this.fields.harvest(task.targetX, task.targetY)) return this.taskUnavailableMessage('Harvest Wheat') ?? 'Nenhum trigo maduro disponível para colher.';
       this.economy.addWheat(3);
       return 'Trigo colhido: produção virou estoque e o campo voltou ao solo bruto.';
     }
 
     this.economy.addMilk(1);
-    return 'Leite produzido e adicionado ao estoque.';
+    return 'Leite produzido no Barn e adicionado ao estoque.';
   }
 
   private selectWorker(workerId: string, notify = true) {
-    if (!this.workers.has(workerId)) {
-      return;
-    }
-
+    if (!this.workers.has(workerId)) return;
     this.selectedWorkerId = workerId;
     this.workers.forEach((worker) => this.updateWorkerVisuals(worker));
     const worker = this.getSelectedWorker();
@@ -576,10 +509,7 @@ export class FarmScene extends Phaser.Scene {
 
   private centerCameraOnWorker(workerId: string) {
     const worker = this.workers.get(workerId);
-    if (!worker) {
-      return;
-    }
-
+    if (!worker) return;
     this.cameras.main.centerOn(worker.sprite.x, worker.sprite.y);
     this.publishState(`Câmera centralizada em ${worker.name}.`);
   }
@@ -590,7 +520,7 @@ export class FarmScene extends Phaser.Scene {
     const economyMessage = this.economy.nextDay();
     const grew = this.fields.advanceDay();
     this.redrawFields();
-    this.publishState(grew ? `${economyMessage} A plantação avançou um estágio visível.` : economyMessage);
+    this.publishState(grew ? `${economyMessage} ${this.cropProgressMessage()}` : `${economyMessage} ${this.cropProgressMessage()}`);
   }
   private setRole(role: GameRole) { this.role = role; this.publishState(role === 'admin' ? 'Modo administrador ativado.' : 'Modo jogador ativado.'); }
   private applyAdminEvent(type: AdminEventType) {
@@ -617,10 +547,7 @@ export class FarmScene extends Phaser.Scene {
     worker.sprite.setDepth(10 + worker.sprite.y / 1000);
     worker.nameLabel.setColor(isSelected ? '#fff06a' : '#ffffff');
     worker.statusLabel.setText(this.statusText(worker));
-
-    if (repositionLabels) {
-      this.positionWorkerLabels(worker);
-    }
+    if (repositionLabels) this.positionWorkerLabels(worker);
   }
 
   private positionWorkerLabels(worker: WorkerRuntime) {
@@ -631,11 +558,7 @@ export class FarmScene extends Phaser.Scene {
 
   private statusText(worker: WorkerRuntime) {
     const task = worker.tasks.currentTask?.type;
-    if (task) {
-      return `${worker.status}: ${task}`;
-    }
-
-    return worker.status;
+    return task ? `${worker.status}: ${task}` : worker.status;
   }
 
   private publishState(notification?: string) {
@@ -657,19 +580,14 @@ export class FarmScene extends Phaser.Scene {
       events: this.economy.events.map((event) => ({ ...event })),
     });
 
-    if (notification) {
-      emitGameEvent('notification', notification);
-    }
+    if (notification) emitGameEvent('notification', notification);
   }
 
   private snapshotWorker(worker: WorkerRuntime): WorkerSnapshot {
     return {
       id: worker.id,
       name: worker.name,
-      position: {
-        x: worker.tileX,
-        y: worker.tileY,
-      },
+      position: { x: worker.tileX, y: worker.tileY },
       status: worker.status,
       currentTask: worker.tasks.currentTask ? { ...worker.tasks.currentTask } : null,
       taskQueue: worker.tasks.queue.map((task) => ({ ...task })),
