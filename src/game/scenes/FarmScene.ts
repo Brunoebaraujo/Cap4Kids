@@ -99,6 +99,8 @@ export class FarmScene extends Phaser.Scene {
     gameEvents.on('sell', this.sellProduct, this);
     gameEvents.on('buySeeds', this.buySeeds, this);
     gameEvents.on('plantCrop', this.plantSelectedCrop, this);
+    gameEvents.on('chooseHarvest', this.chooseHarvest, this);
+    gameEvents.on('harvestPlot', this.harvestSelectedPlot, this);
     gameEvents.on('nextDay', this.nextDay, this);
     gameEvents.on('adminEvent', this.applyAdminEvent, this);
     gameEvents.on('role', this.setRole, this);
@@ -112,6 +114,8 @@ export class FarmScene extends Phaser.Scene {
       gameEvents.off('sell', this.sellProduct, this);
       gameEvents.off('buySeeds', this.buySeeds, this);
       gameEvents.off('plantCrop', this.plantSelectedCrop, this);
+      gameEvents.off('chooseHarvest', this.chooseHarvest, this);
+      gameEvents.off('harvestPlot', this.harvestSelectedPlot, this);
       gameEvents.off('nextDay', this.nextDay, this);
       gameEvents.off('adminEvent', this.applyAdminEvent, this);
       gameEvents.off('role', this.setRole, this);
@@ -569,7 +573,7 @@ export class FarmScene extends Phaser.Scene {
   private targetForTask(worker: WorkerRuntime, task: TaskType) {
     if (task === 'Prepare Soil') return this.targetForPlotState('Raw') ?? this.lastPlannedTarget(worker);
     if (task === 'Plant Wheat') return this.targetForPlotState('Prepared') ?? this.lastPlannedTarget(worker);
-    if (task === 'Harvest Wheat') return this.targetForPlotState('Mature') ?? this.lastPlannedTarget(worker);
+    if (task === 'Harvest Wheat') { this.chooseHarvest(); return this.lastPlannedTarget(worker); }
     if (task === 'Milk Cow') return { tileX: BARN_TARGET.tileX, tileY: BARN_TARGET.tileY };
     return { tileX: worker.tileX, tileY: worker.tileY };
   }
@@ -585,6 +589,21 @@ export class FarmScene extends Phaser.Scene {
     const lastQueuedTask = worker.tasks.queue[worker.tasks.queue.length - 1];
     const task = lastQueuedTask ?? worker.tasks.currentTask;
     return task ? { tileX: task.targetX, tileY: task.targetY } : { tileX: worker.tileX, tileY: worker.tileY };
+  }
+
+  private chooseHarvest() {
+    if (!this.fields.getFirstPlotWithState('Mature')) { this.publishState('Não há culturas maduras para colher.'); return; }
+    emitGameEvent('chooseHarvest', undefined);
+    this.publishState('Escolha qual parcela madura colher.');
+  }
+
+  private harvestSelectedPlot(plotId: string) {
+    const plot = this.fields.getPlotById(plotId);
+    if (!plot || plot.state !== 'Mature') { this.publishState('Esta parcela ainda não está pronta para colheita.'); return; }
+    const field = this.fields.getFieldById(plot.fieldId);
+    const targetWorld = this.plotCenter(plotId) ?? undefined;
+    if (!field) return;
+    this.enqueueTask(this.getSelectedWorker(), 'Harvest Wheat', field.tileX, field.tileY, plotId, targetWorld);
   }
 
   private plantSelectedCrop(selection: { plotId: string; cropId: CropId }) {
