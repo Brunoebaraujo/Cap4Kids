@@ -65,6 +65,7 @@ function App() {
   const [notification, setNotification] = useState('Selecione um trabalhador e clique em um campo.');
   const [tutorialDismissed, setTutorialDismissed] = useState(false);
   const [shopOpen, setShopOpen] = useState(false);
+  const [cropChoicePlotId, setCropChoicePlotId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!gameRootRef.current || gameRef.current) return;
@@ -83,10 +84,12 @@ function App() {
   const nextDay = () => gameEvents.emit('nextDay');
   const setRole = (role: GameRole) => gameEvents.emit('role', role);
   const triggerEvent = (event: AdminEventType) => gameEvents.emit('adminEvent', event);
+  const plantCrop = (plotId: string, cropId: CropId) => { gameEvents.emit('plantCrop', { plotId, cropId }); setCropChoicePlotId(null); };
 
   useEffect(() => {
     const handleState = (nextSnapshot: GameSnapshot) => setSnapshot(nextSnapshot);
     const handleOpenShop = () => setShopOpen(true);
+    const handleChooseCrop = (plotId: string) => setCropChoicePlotId(plotId);
     const handleCloseShop = () => setShopOpen(false);
     const handleNotification = (message: string) => {
       if (message !== 'Selecione um trabalhador e clique no Campo 1 para preparar o solo.' && message !== 'Selecione um trabalhador e clique em um campo.') {
@@ -98,12 +101,14 @@ function App() {
     gameEvents.on('state', handleState);
     gameEvents.on('notification', handleNotification);
     gameEvents.on('openShop', handleOpenShop);
+    gameEvents.on('chooseCrop', handleChooseCrop);
     gameEvents.on('closeShop', handleCloseShop);
 
     return () => {
       gameEvents.off('state', handleState);
       gameEvents.off('notification', handleNotification);
       gameEvents.off('openShop', handleOpenShop);
+      gameEvents.off('chooseCrop', handleChooseCrop);
       gameEvents.off('closeShop', handleCloseShop);
     };
   }, []);
@@ -159,6 +164,22 @@ function App() {
           </div>
           <small className="prototype-note">Rivais simulados nesta versão; o servidor autoritativo substituirá esta camada.</small>
         </section>
+
+        {cropChoicePlotId && <section className="hud-section shop-panel">
+          <h2>Escolher cultura</h2>
+          <p className="lesson">Selecione qual semente plantar nesta parcela preparada.</p>
+          <div className="shop-grid">
+            {CROPS.filter((crop) => snapshot.inventory.seeds[crop.id] > 0).map((crop) => (
+              <button key={crop.id} type="button" onClick={() => plantCrop(cropChoicePlotId, crop.id)}>
+                <span>{crop.label}</span>
+                <strong>Sementes: {snapshot.inventory.seeds[crop.id]}</strong>
+                <small>Plantar {crop.plantMinutes}min · Crescer {crop.growthDays}d · Colher {crop.harvestMinutes}min · Venda ${crop.saleValueUsd}</small>
+              </button>
+            ))}
+          </div>
+          {CROPS.every((crop) => snapshot.inventory.seeds[crop.id] <= 0) && <p className="lesson">Você não tem sementes. Visite a lojinha.</p>}
+          <button type="button" onClick={() => setCropChoicePlotId(null)}>Cancelar</button>
+        </section>}
 
         {shopOpen && <section className="hud-section shop-panel">
           <h2>Lojinha · Sementes</h2>
