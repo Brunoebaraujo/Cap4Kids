@@ -8,6 +8,7 @@ export type WorkerStatus = 'Idle' | 'Busy' | 'Moving';
 export type GameRole = 'player' | 'admin';
 export type AdminEventType = 'drought' | 'rain' | 'subsidy' | 'inflation' | 'locusts';
 
+// Task targets may include exact world coordinates for per-plot work.
 export interface TaskCommand { id: number; type: TaskType; targetX: number; targetY: number; targetPlotId?: string; targetWorldX?: number; targetWorldY?: number }
 export interface Inventory { seeds: number; wheat: number; milk: number }
 export interface Economy {
