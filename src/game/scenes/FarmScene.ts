@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { createPixelAssets } from '../assets/createPixelAssets';
+import { CROPS, cropById } from '../data/crops';
 import { FIELD_LAYOUTS, fieldPolygon, fieldWorkPoint, type FieldLayout } from '../data/fieldLayout';
 import { MAP_AREAS } from '../data/mapAreas';
 import { emitGameEvent, gameEvents } from '../eventBus';
@@ -13,6 +14,7 @@ import {
   type Direction,
   type TaskCommand,
   type TaskType,
+  type CropId,
   type WorkerSnapshot,
   type WorkerStatus,
 } from '../types';
@@ -96,6 +98,7 @@ export class FarmScene extends Phaser.Scene {
     gameEvents.on('findWorker', this.centerCameraOnWorker, this);
     gameEvents.on('sell', this.sellProduct, this);
     gameEvents.on('buySeeds', this.buySeeds, this);
+    gameEvents.on('plantCrop', this.plantSelectedCrop, this);
     gameEvents.on('nextDay', this.nextDay, this);
     gameEvents.on('adminEvent', this.applyAdminEvent, this);
     gameEvents.on('role', this.setRole, this);
@@ -108,6 +111,7 @@ export class FarmScene extends Phaser.Scene {
       gameEvents.off('findWorker', this.centerCameraOnWorker, this);
       gameEvents.off('sell', this.sellProduct, this);
       gameEvents.off('buySeeds', this.buySeeds, this);
+      gameEvents.off('plantCrop', this.plantSelectedCrop, this);
       gameEvents.off('nextDay', this.nextDay, this);
       gameEvents.off('adminEvent', this.applyAdminEvent, this);
       gameEvents.off('role', this.setRole, this);
@@ -264,7 +268,8 @@ export class FarmScene extends Phaser.Scene {
       const p2 = lerp(leftTop, rightTop, colRight);
       const p3 = lerp(leftBottom, rightBottom, colRight);
       const p4 = lerp(leftBottom, rightBottom, colLeft);
-      const color = plot.state === 'Prepared' ? 0x4b2d18 : plot.state === 'Planted' ? 0x8a6a31 : plot.state === 'Growing' ? 0x4f8d35 : plot.state === 'Mature' ? 0xd8a72d : plot.state === 'Locked' ? 0x30352e : 0x6f4c2d;
+      const cropColor = plot.cropId ? Number.parseInt(cropById(plot.cropId).color.slice(1), 16) : 0;
+      const color = plot.state === 'Prepared' ? 0x4b2d18 : plot.state === 'Planted' ? cropColor || 0x8a6a31 : plot.state === 'Growing' ? cropColor || 0x4f8d35 : plot.state === 'Mature' ? cropColor || 0xd8a72d : plot.state === 'Locked' ? 0x30352e : 0x6f4c2d;
       const alpha = plot.state === 'Raw' ? (isHovered ? 0.08 : 0.02) : plot.state === 'Locked' ? 0.08 : 0.38;
       this.fieldLayer.fillStyle(color, alpha);
       this.fieldLayer.lineStyle(1, plot.state === 'Locked' ? 0x777777 : 0xffe28a, this.debugFields || isHovered ? 0.30 : 0.10);
@@ -420,6 +425,11 @@ export class FarmScene extends Phaser.Scene {
     }
 
     const task = this.taskForFieldState(plot.state);
+    if (task === 'Plant Wheat') {
+      emitGameEvent('chooseCrop', hit.plotId);
+      this.publishState('Escolha qual cultura plantar nesta parcela preparada.');
+      return;
+    }
     if (!task) {
       this.publishState(this.fieldStateMessage(field.state));
       return;
@@ -577,6 +587,16 @@ export class FarmScene extends Phaser.Scene {
     return task ? { tileX: task.targetX, tileY: task.targetY } : { tileX: worker.tileX, tileY: worker.tileY };
   }
 
+  private plantSelectedCrop(selection: { plotId: string; cropId: CropId }) {
+    const plot = this.fields.getPlotById(selection.plotId);
+    if (!plot || plot.state !== 'Prepared') { this.publishState('Esta parcela não está preparada para plantio.'); return; }
+    if (this.economy.inventory.seeds[selection.cropId] <= 0) { this.publishState('Você não tem sementes desta cultura. Visite a lojinha.'); return; }
+    const field = this.fields.getFieldById(plot.fieldId);
+    const targetWorld = this.plotCenter(selection.plotId) ?? undefined;
+    if (!field) return;
+    this.enqueueTask(this.getSelectedWorker(), 'Plant Wheat', field.tileX, field.tileY, selection.plotId, targetWorld, selection.cropId);
+  }
+
   private enqueueTaskForSelectedWorker(task: TaskType) {
     const unavailable = this.taskUnavailableMessage(task);
     if (unavailable) {
@@ -590,10 +610,10 @@ export class FarmScene extends Phaser.Scene {
     this.enqueueTask(worker, task, target.tileX, target.tileY, targetPlotId, targetWorld);
   }
 
-  private enqueueTask(worker: WorkerRuntime, taskType: TaskType, targetX: number, targetY: number, targetPlotId?: string, targetWorld?: { x: number; y: number }) {
+  private enqueueTask(worker: WorkerRuntime, taskType: TaskType, targetX: number, targetY: number, targetPlotId?: string, targetWorld?: { x: number; y: number }, cropId?: CropId) {
     if (taskType === 'Milk Cow') this.showCowAtBarn();
 
-    const task: TaskCommand = { id: this.nextTaskId, type: taskType, targetX, targetY, targetPlotId, targetWorldX: targetWorld?.x, targetWorldY: targetWorld?.y };
+    const task: TaskCommand = { id: this.nextTaskId, type: taskType, targetX, targetY, targetPlotId, targetWorldX: targetWorld?.x, targetWorldY: targetWorld?.y, cropId };
     this.nextTaskId += 1;
 
     const started = worker.tasks.enqueue(task);
@@ -704,16 +724,19 @@ export class FarmScene extends Phaser.Scene {
     }
 
     if (task.type === 'Plant Wheat') {
-      if (!this.economy.useSeed()) return 'Sem sementes disponíveis. Compre sementes no mercado local.';
-      if (this.fields.plant(task.targetPlotId ?? task.targetX, task.targetY)) return 'Trigo semeado. Encerre o dia duas vezes: plantado → crescendo → maduro.';
-      this.economy.inventory.seeds.wheat += 1;
+      const cropId = task.cropId ?? 'wheat';
+      const crop = cropById(cropId);
+      if (!this.economy.useSeed(cropId)) return 'Sem sementes de ' + crop.label + '. Compre sementes na lojinha.';
+      if (this.fields.plant(task.targetPlotId ?? task.targetX, cropId, crop.growthDays)) return crop.label + ' plantado. Crescimento estimado: ' + crop.growthDays + ' dia(s).';
+      this.economy.inventory.seeds[cropId] += 1;
       return 'Nenhum campo preparado disponível para plantar.';
     }
 
     if (task.type === 'Harvest Wheat') {
-      if (!this.fields.harvest(task.targetPlotId ?? task.targetX, task.targetY)) return this.taskUnavailableMessage('Harvest Wheat') ?? 'Nenhum trigo maduro disponível para colher.';
-      this.economy.addWheat(3);
-      return 'Trigo colhido: produção virou estoque e o campo voltou ao solo bruto.';
+      const harvestedCrop = this.fields.harvest(task.targetPlotId ?? task.targetX);
+      if (!harvestedCrop) return this.taskUnavailableMessage('Harvest Wheat') ?? 'Nenhuma cultura madura disponível para colher.';
+      this.economy.addCrop(harvestedCrop, 3);
+      return cropById(harvestedCrop).label + ' colhido: produção virou estoque e o campo voltou ao solo bruto.';
     }
 
     if (this.cowMilkedToday) return 'Esta vaca já foi ordenhada hoje. Encerre o dia para ordenhar novamente.';
