@@ -17,6 +17,7 @@ export interface Economy {
   debt: number;
   dailyHouseholdCost: number;
   inflationRate: number;
+  cropPrices: Record<CropId, number>;
   wheatPrice: number;
   milkPrice: number;
   wealthCreated: number;
@@ -37,5 +38,5 @@ export interface GameSnapshot {
 }
 export interface GameEvents {
   state: GameSnapshot; notification: string; task: TaskType; selectWorker: string; findWorker: string;
-  sell: CropId | 'milk'; buySeeds: CropId; openShop: undefined; closeShop: undefined; chooseCrop: string; plantCrop: { plotId: string; cropId: CropId }; nextDay: undefined; adminEvent: AdminEventType; role: GameRole;
+  sell: CropId | 'milk'; buySeeds: CropId; openShop: undefined; closeShop: undefined; chooseCrop: string; plantCrop: { plotId: string; cropId: CropId }; chooseHarvest: undefined; harvestPlot: string; nextDay: undefined; adminEvent: AdminEventType; role: GameRole;
 }
