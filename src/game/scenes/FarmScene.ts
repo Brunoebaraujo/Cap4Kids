@@ -39,6 +39,10 @@ const TILE_INDEX = {
   water: 7,
 } as const;
 
+type FieldDragTarget =
+  | { kind: 'vertex'; fieldId: number; vertexIndex: number }
+  | { kind: 'workPoint'; fieldId: number };
+
 interface WorkerRuntime {
   id: string;
   name: string;
@@ -63,7 +67,16 @@ export class FarmScene extends Phaser.Scene {
   private skipNextWorldClick = false;
   private hoveredFieldId: number | null = null;
   private debugFields = false;
+  private editFields = false;
+  private editedFieldId = 1;
+  private dragTarget: FieldDragTarget | null = null;
   private fieldDebugLabels: Phaser.GameObjects.Text[] = [];
+  private editorHint?: Phaser.GameObjects.Text;
+  private editableLayouts = FIELD_LAYOUTS.map((layout) => ({
+    ...layout,
+    polygon: layout.polygon.map((point) => ({ ...point })),
+    workPoint: { ...layout.workPoint },
+  }));
 
   private readonly workers = new Map<string, WorkerRuntime>();
   private readonly fields = new FieldSystem();
@@ -84,8 +97,9 @@ export class FarmScene extends Phaser.Scene {
     this.createWorkers();
 
     this.cursors = this.input.keyboard!.createCursorKeys();
-    this.keys = this.input.keyboard!.addKeys('W,A,S,D,G,SPACE,ONE,TWO,THREE,FOUR') as Record<string, Phaser.Input.Keyboard.Key>;
+    this.keys = this.input.keyboard!.addKeys('W,A,S,D,E,G,C,R,TAB,SPACE,ONE,TWO,THREE,FOUR') as Record<string, Phaser.Input.Keyboard.Key>;
 
+    this.input.on('pointerdown', this.handleEditorPointerDown, this);
     this.input.on('pointerup', this.handleWorldClick, this);
     this.input.on('pointermove', this.handleFieldHover, this);
     gameEvents.on('task', this.enqueueTaskForSelectedWorker, this);
@@ -97,6 +111,7 @@ export class FarmScene extends Phaser.Scene {
     gameEvents.on('adminEvent', this.applyAdminEvent, this);
     gameEvents.on('role', this.setRole, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.input.off('pointerdown', this.handleEditorPointerDown, this);
       this.input.off('pointerup', this.handleWorldClick, this);
       this.input.off('pointermove', this.handleFieldHover, this);
       gameEvents.off('task', this.enqueueTaskForSelectedWorker, this);
@@ -114,6 +129,23 @@ export class FarmScene extends Phaser.Scene {
   }
 
   update() {
+    if (Phaser.Input.Keyboard.JustDown(this.keys.E)) {
+      this.editFields = !this.editFields;
+      this.debugFields = this.debugFields || this.editFields;
+      this.redrawFields();
+      this.publishState(this.editFields ? 'Editor de campos ativado. Arraste os pontos.' : 'Editor de campos desativado.');
+    }
+    if (this.editFields && Phaser.Input.Keyboard.JustDown(this.keys.TAB)) {
+      this.editedFieldId = this.editedFieldId >= this.editableLayouts.length ? 1 : this.editedFieldId + 1;
+      this.redrawFields();
+      this.publishState(`Editando Campo ${this.editedFieldId}.`);
+    }
+    if (this.editFields && Phaser.Input.Keyboard.JustDown(this.keys.C)) {
+      this.copyFieldLayout();
+    }
+    if (this.editFields && Phaser.Input.Keyboard.JustDown(this.keys.R)) {
+      this.resetFieldLayoutEditor();
+    }
     if (Phaser.Input.Keyboard.JustDown(this.keys.G)) {
       this.debugFields = !this.debugFields;
       this.redrawFields();
@@ -178,6 +210,14 @@ export class FarmScene extends Phaser.Scene {
       backgroundColor: '#151b12cc',
       padding: { x: 8, y: 5 },
     }).setDepth(20).setScrollFactor(0);
+
+    this.editorHint = this.add.text(16, 42, '', {
+      fontFamily: 'monospace',
+      fontSize: '10px',
+      color: '#d9f7ff',
+      backgroundColor: '#0a1520dd',
+      padding: { x: 8, y: 5 },
+    }).setDepth(35).setScrollFactor(0).setVisible(false);
 
   }
 
@@ -258,26 +298,29 @@ export class FarmScene extends Phaser.Scene {
     this.fieldLayer.clear();
     this.fieldDebugLabels.forEach((label) => label.destroy());
     this.fieldDebugLabels = [];
-    FIELD_LAYOUTS.forEach((layout) => {
+    this.updateEditorHint();
+    this.editableLayouts.forEach((layout) => {
       const field = this.fields.getFieldById(layout.id);
       if (!field) return;
       const polygon = new Phaser.Geom.Polygon(fieldPolygon(layout, VIEW_WIDTH, VIEW_HEIGHT));
       const isHovered = this.hoveredFieldId === field.id;
+      const isEditing = this.editFields && this.editedFieldId === field.id;
       const color = field.state === 'Prepared' ? 0x4b2d18 : field.state === 'Planted' ? 0x8a6a31 : field.state === 'Growing' ? 0x4f8d35 : field.state === 'Mature' ? 0xd8a72d : field.state === 'Locked' ? 0x30352e : 0x6f4c2d;
       const stateAlpha = field.state === 'Raw' ? 0 : field.state === 'Locked' ? 0.05 : 0.34;
-      this.fieldLayer.fillStyle(color, isHovered ? Math.max(stateAlpha, 0.12) : stateAlpha);
-      this.fieldLayer.lineStyle(this.debugFields || isHovered ? 2 : 0, field.state === 'Locked' ? 0xb5b0a3 : 0xffd86b, this.debugFields ? 0.8 : isHovered ? 0.9 : 0);
+      this.fieldLayer.fillStyle(color, isHovered || isEditing ? Math.max(stateAlpha, 0.12) : stateAlpha);
+      this.fieldLayer.lineStyle(this.debugFields || isHovered || isEditing ? 2 : 0, isEditing ? 0x65e2ff : field.state === 'Locked' ? 0xb5b0a3 : 0xffd86b, this.debugFields || isEditing ? 0.8 : isHovered ? 0.9 : 0);
       this.fieldLayer.fillPoints(polygon.points, true).strokePoints(polygon.points, true);
       this.drawFieldState(polygon, field.state);
-      if (this.debugFields) this.drawFieldDebug(layout, polygon, field.state);
+      if (this.debugFields || this.editFields) this.drawFieldDebug(layout, polygon, field.state);
     });
   }
 
   private drawFieldDebug(layout: (typeof FIELD_LAYOUTS)[number], polygon: Phaser.Geom.Polygon, state: string) {
-    this.fieldLayer.fillStyle(0x61d6ff, 0.95);
-    polygon.points.forEach((point) => this.fieldLayer.fillCircle(point.x, point.y, 4));
+    const isEditing = this.editFields && this.editedFieldId === layout.id;
+    this.fieldLayer.fillStyle(isEditing ? 0x65e2ff : 0x61d6ff, isEditing ? 1 : 0.78);
+    polygon.points.forEach((point) => this.fieldLayer.fillCircle(point.x, point.y, isEditing ? 7 : 4));
     const workPoint = fieldWorkPoint(layout, VIEW_WIDTH, VIEW_HEIGHT);
-    this.fieldLayer.lineStyle(2, 0xff5b6e, 1).strokeCircle(workPoint.x, workPoint.y, 7);
+    this.fieldLayer.lineStyle(isEditing ? 3 : 2, 0xff5b6e, 1).strokeCircle(workPoint.x, workPoint.y, isEditing ? 10 : 7);
     const label = this.add.text(workPoint.x + 10, workPoint.y - 20, `Campo ${layout.id}\n${state}`, {
       fontFamily: 'monospace', fontSize: '11px', color: '#ffffff', backgroundColor: '#101820dd', padding: { x: 5, y: 3 },
     }).setDepth(30);
@@ -365,6 +408,10 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private handleWorldClick(pointer: Phaser.Input.Pointer) {
+    if (this.editFields) {
+      this.dragTarget = null;
+      return;
+    }
     if (this.skipNextWorldClick) {
       this.skipNextWorldClick = false;
       return;
@@ -387,15 +434,94 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private handleFieldHover(pointer: Phaser.Input.Pointer) {
-    const fieldId = this.fieldLayoutAt(pointer.worldX, pointer.worldY)?.id ?? null;
+    if (this.editFields && this.dragTarget) {
+      this.moveEditedPoint(pointer.worldX, pointer.worldY);
+      return;
+    }
+    const editorTarget = this.editFields ? this.editorTargetAt(pointer.worldX, pointer.worldY) : null;
+    const fieldId = editorTarget?.fieldId ?? this.fieldLayoutAt(pointer.worldX, pointer.worldY)?.id ?? null;
     if (fieldId === this.hoveredFieldId) return;
     this.hoveredFieldId = fieldId;
     this.redrawFields();
-    this.game.canvas.style.cursor = fieldId ? 'pointer' : 'default';
+    this.game.canvas.style.cursor = editorTarget ? 'grab' : fieldId ? 'pointer' : 'default';
   }
 
   private fieldLayoutAt(x: number, y: number) {
-    return FIELD_LAYOUTS.find((layout) => Phaser.Geom.Polygon.Contains(new Phaser.Geom.Polygon(fieldPolygon(layout, VIEW_WIDTH, VIEW_HEIGHT)), x, y));
+    return this.editableLayouts.find((layout) => Phaser.Geom.Polygon.Contains(new Phaser.Geom.Polygon(fieldPolygon(layout, VIEW_WIDTH, VIEW_HEIGHT)), x, y));
+  }
+
+  private handleEditorPointerDown(pointer: Phaser.Input.Pointer) {
+    if (!this.editFields) return;
+    const target = this.editorTargetAt(pointer.worldX, pointer.worldY);
+    if (!target) return;
+    this.dragTarget = target;
+    this.editedFieldId = target.fieldId;
+    this.game.canvas.style.cursor = 'grabbing';
+    this.moveEditedPoint(pointer.worldX, pointer.worldY);
+  }
+
+  private editorTargetAt(x: number, y: number): FieldDragTarget | null {
+    const layout = this.editableLayouts.find((candidate) => candidate.id === this.editedFieldId);
+    if (!layout) return null;
+    const workPoint = fieldWorkPoint(layout, VIEW_WIDTH, VIEW_HEIGHT);
+    if (Phaser.Math.Distance.Between(x, y, workPoint.x, workPoint.y) <= 14) {
+      return { kind: 'workPoint', fieldId: layout.id };
+    }
+    const points = fieldPolygon(layout, VIEW_WIDTH, VIEW_HEIGHT);
+    const vertexIndex = points.findIndex((point) => Phaser.Math.Distance.Between(x, y, point.x, point.y) <= 12);
+    return vertexIndex >= 0 ? { kind: 'vertex', fieldId: layout.id, vertexIndex } : null;
+  }
+
+  private moveEditedPoint(x: number, y: number) {
+    if (!this.dragTarget) return;
+    const layout = this.editableLayouts.find((candidate) => candidate.id === this.dragTarget?.fieldId);
+    if (!layout) return;
+    const normalized = {
+      x: Phaser.Math.Clamp(Number((x / VIEW_WIDTH).toFixed(4)), 0, 1),
+      y: Phaser.Math.Clamp(Number((y / VIEW_HEIGHT).toFixed(4)), 0, 1),
+    };
+    if (this.dragTarget.kind === 'workPoint') {
+      layout.workPoint = normalized;
+    } else {
+      layout.polygon[this.dragTarget.vertexIndex] = normalized;
+    }
+    this.redrawFields();
+  }
+
+  private layoutExport() {
+    return this.editableLayouts.map((layout) => ({
+      id: layout.id,
+      polygon: layout.polygon.map((point) => ({ x: Number(point.x.toFixed(4)), y: Number(point.y.toFixed(4)) })),
+      workPoint: { x: Number(layout.workPoint.x.toFixed(4)), y: Number(layout.workPoint.y.toFixed(4)) },
+    }));
+  }
+
+  private async copyFieldLayout() {
+    const text = JSON.stringify(this.layoutExport(), null, 2);
+    try {
+      await window.navigator.clipboard.writeText(text);
+      this.publishState('Layout dos campos copiado para a área de transferência.');
+    } catch {
+      console.log(text);
+      this.publishState('Não consegui copiar automaticamente; layout enviado ao console do navegador.');
+    }
+  }
+
+  private resetFieldLayoutEditor() {
+    this.editableLayouts = FIELD_LAYOUTS.map((layout) => ({
+      ...layout,
+      polygon: layout.polygon.map((point) => ({ ...point })),
+      workPoint: { ...layout.workPoint },
+    }));
+    this.redrawFields();
+    this.publishState('Layout dos campos restaurado para a versão salva.');
+  }
+
+  private updateEditorHint() {
+    if (!this.editorHint) return;
+    this.editorHint.setVisible(this.editFields);
+    if (!this.editFields) return;
+    this.editorHint.setText(`Editor de campos | Campo ${this.editedFieldId} | arraste pontos azuis/magenta | Tab troca | C copia | R restaura | E sai`);
   }
 
   private taskForFieldState(state: string): TaskType | null {
