@@ -66,6 +66,7 @@ function App() {
   const [tutorialDismissed, setTutorialDismissed] = useState(false);
   const [shopOpen, setShopOpen] = useState(false);
   const [cropChoicePlotId, setCropChoicePlotId] = useState<string | null>(null);
+  const [harvestOpen, setHarvestOpen] = useState(false);
 
   useEffect(() => {
     if (!gameRootRef.current || gameRef.current) return;
@@ -85,11 +86,13 @@ function App() {
   const setRole = (role: GameRole) => gameEvents.emit('role', role);
   const triggerEvent = (event: AdminEventType) => gameEvents.emit('adminEvent', event);
   const plantCrop = (plotId: string, cropId: CropId) => { gameEvents.emit('plantCrop', { plotId, cropId }); setCropChoicePlotId(null); };
+  const harvestPlot = (plotId: string) => { gameEvents.emit('harvestPlot', plotId); setHarvestOpen(false); };
 
   useEffect(() => {
     const handleState = (nextSnapshot: GameSnapshot) => setSnapshot(nextSnapshot);
     const handleOpenShop = () => setShopOpen(true);
     const handleChooseCrop = (plotId: string) => setCropChoicePlotId(plotId);
+    const handleChooseHarvest = () => setHarvestOpen(true);
     const handleCloseShop = () => setShopOpen(false);
     const handleNotification = (message: string) => {
       if (message !== 'Selecione um trabalhador e clique no Campo 1 para preparar o solo.' && message !== 'Selecione um trabalhador e clique em um campo.') {
@@ -102,6 +105,7 @@ function App() {
     gameEvents.on('notification', handleNotification);
     gameEvents.on('openShop', handleOpenShop);
     gameEvents.on('chooseCrop', handleChooseCrop);
+    gameEvents.on('chooseHarvest', handleChooseHarvest);
     gameEvents.on('closeShop', handleCloseShop);
 
     return () => {
@@ -109,6 +113,7 @@ function App() {
       gameEvents.off('notification', handleNotification);
       gameEvents.off('openShop', handleOpenShop);
       gameEvents.off('chooseCrop', handleChooseCrop);
+      gameEvents.off('chooseHarvest', handleChooseHarvest);
       gameEvents.off('closeShop', handleCloseShop);
     };
   }, []);
@@ -149,8 +154,10 @@ function App() {
         <section className="hud-section market-section">
           <h2>Mercado local</h2>
           <div className="market-grid">
-            <button onClick={() => sell('wheat')}><span>Trigo</span><strong>{snapshot.economy.wheatPrice} moedas</strong><small>Vender estoque</small></button>
-            <button onClick={() => sell('milk')}><span>Leite</span><strong>{snapshot.economy.milkPrice} moedas</strong><small>Vender estoque</small></button>
+            {CROPS.map((crop) => (
+              <button key={crop.id} onClick={() => sell(crop.id)}><span>{crop.label}</span><strong>{snapshot.economy.cropPrices[crop.id]} moedas</strong><small>Estoque {snapshot.inventory[crop.id]} · vender</small></button>
+            ))}
+            <button onClick={() => sell('milk')}><span>Leite</span><strong>{snapshot.economy.milkPrice} moedas</strong><small>Estoque {snapshot.inventory.milk} · vender</small></button>
             <button onClick={() => setShopOpen(true)}><span>Sementes</span><strong>Na lojinha</strong><small>Comprar insumos</small></button>
           </div>
           <p className="lesson">Preços sinalizam escassez. A inflação reduz o poder de compra; concorrentes reagem ao mercado a cada dia.</p>
@@ -164,6 +171,21 @@ function App() {
           </div>
           <small className="prototype-note">Rivais simulados nesta versão; o servidor autoritativo substituirá esta camada.</small>
         </section>
+
+        {harvestOpen && <section className="hud-section shop-panel">
+          <h2>Colher cultura</h2>
+          <p className="lesson">Escolha uma parcela madura para colher.</p>
+          <div className="shop-grid">
+            {snapshot.fields.flatMap((field) => field.plots ?? []).filter((plot) => plot.state === 'Mature').map((plot) => { const crop = CROPS.find((candidate) => candidate.id === plot.cropId); return (
+              <button key={plot.id} type="button" onClick={() => harvestPlot(plot.id)}>
+                <span>{crop?.label ?? 'Cultura'} · Campo {plot.fieldId}</span>
+                <strong>Linha {plot.row + 1}, coluna {plot.col + 1}</strong>
+                <small>Preço atual: {plot.cropId ? snapshot.economy.cropPrices[plot.cropId] : 0} moedas</small>
+              </button>
+            ); })}
+          </div>
+          <button type="button" onClick={() => setHarvestOpen(false)}>Cancelar</button>
+        </section>}
 
         {cropChoicePlotId && <section className="hud-section shop-panel">
           <h2>Escolher cultura</h2>
@@ -211,7 +233,7 @@ function App() {
           <div className="actions">
             <button type="button" onClick={() => requestTask('Prepare Soil')}>Prepare Soil</button>
             <button type="button" onClick={() => requestTask('Plant Wheat')}>Plant Wheat</button>
-            <button type="button" onClick={() => requestTask('Harvest Wheat')}>Harvest Wheat</button>
+            <button type="button" onClick={() => gameEvents.emit('chooseHarvest', undefined)}>Harvest</button>
             <button type="button" onClick={() => requestTask('Milk Cow')}>Milk Cow</button>
           </div>
           <div className="task-line"><span>Selected Worker</span><strong>{snapshot.selectedWorker.name}</strong></div>
