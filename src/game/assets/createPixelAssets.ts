@@ -121,4 +121,15 @@ export function createPixelAssets(scene: Phaser.Scene) {
   states.forEach((_, index) => {
     texture.add(index, 0, index * frameSize, 0, frameSize, frameSize);
   });
+
+  const cow = scene.add.graphics();
+  cow.fillStyle(0x000000, 0).fillRect(0, 0, 44, 30);
+  cow.fillStyle(0xf7f2df, 1).fillRoundedRect(6, 10, 28, 13, 4);
+  cow.fillStyle(0xf7f2df, 1).fillRoundedRect(29, 7, 10, 10, 3);
+  cow.fillStyle(0x2a2018, 1).fillCircle(14, 14, 4).fillCircle(26, 18, 3).fillRect(33, 11, 2, 2);
+  cow.fillStyle(0xe8d8bd, 1).fillRect(31, 5, 3, 4).fillRect(36, 5, 3, 4);
+  cow.fillStyle(0x4b3223, 1).fillRect(10, 22, 3, 6).fillRect(27, 22, 3, 6).fillRect(18, 22, 3, 5).fillRect(33, 19, 3, 7);
+  cow.lineStyle(2, 0x5c3d26, 1).lineBetween(7, 13, 2, 9);
+  cow.generateTexture('cow-placeholder', 44, 30);
+  cow.destroy();
 }
