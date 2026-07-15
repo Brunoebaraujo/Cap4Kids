@@ -11,7 +11,7 @@ export type CropId = 'wheat' | 'rice' | 'tomato' | 'banana';
 
 // Task targets may include exact world coordinates for per-plot work.
 export interface TaskCommand { id: number; type: TaskType; targetX: number; targetY: number; targetPlotId?: string; targetWorldX?: number; targetWorldY?: number }
-export interface Inventory { seeds: number; wheat: number; rice: number; tomato: number; banana: number; milk: number }
+export interface Inventory { seeds: Record<CropId, number>; wheat: number; rice: number; tomato: number; banana: number; milk: number }
 export interface Economy {
   coins: number;
   debt: number;
