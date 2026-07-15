@@ -56,6 +56,7 @@ export class FarmScene extends Phaser.Scene {
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
   private fieldLayer!: Phaser.GameObjects.Graphics;
   private cowSprite?: Phaser.GameObjects.Image;
+  private cowMilkedToday = false;
   private selectedWorkerId = MAYA_ID;
   private nextTaskId = 1;
   private role: GameRole = 'player';
@@ -168,12 +169,14 @@ export class FarmScene extends Phaser.Scene {
     this.fieldLayer = this.add.graphics().setDepth(2);
     this.redrawFields();
 
-    this.cowSprite = this.add.image(BARN_TARGET.x - 34, BARN_TARGET.y + 6, 'cow-placeholder')
+    const cowStart = this.randomPointInArea('corral') ?? { x: BARN_TARGET.x - 54, y: BARN_TARGET.y + 16 };
+    this.cowSprite = this.add.image(cowStart.x, cowStart.y, 'cow-placeholder')
       .setOrigin(0.5, 1)
       .setScale(1.25)
       .setDepth(9)
-      .setAlpha(0)
-      .setVisible(false);
+      .setAlpha(1)
+      .setVisible(true);
+    this.scheduleCowWander();
 
     this.add.text(24, 20, 'Selecione um trabalhador e clique em um campo.', {
       fontFamily: 'monospace',
@@ -419,6 +422,34 @@ export class FarmScene extends Phaser.Scene {
     this.game.canvas.style.cursor = fieldId ? 'pointer' : 'default';
   }
 
+  private randomPointInArea(areaId: string) {
+    const polygon = this.normalizedAreaPolygon(areaId);
+    if (!polygon) return null;
+    const bounds = Phaser.Geom.Polygon.GetAABB(polygon);
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      const x = Phaser.Math.Between(Math.ceil(bounds.left), Math.floor(bounds.right));
+      const y = Phaser.Math.Between(Math.ceil(bounds.top), Math.floor(bounds.bottom));
+      if (Phaser.Geom.Polygon.Contains(polygon, x, y)) return { x, y };
+    }
+    return { x: bounds.centerX, y: bounds.centerY };
+  }
+
+  private scheduleCowWander() {
+    if (!this.cowSprite) return;
+    const target = this.randomPointInArea('corral');
+    if (!target) return;
+    const distance = Phaser.Math.Distance.Between(this.cowSprite.x, this.cowSprite.y, target.x, target.y);
+    this.tweens.add({
+      targets: this.cowSprite,
+      x: target.x,
+      y: target.y,
+      duration: Phaser.Math.Clamp(distance * 9, 1500, 5200),
+      delay: Phaser.Math.Between(900, 2600),
+      ease: 'Sine.easeInOut',
+      onComplete: () => this.scheduleCowWander(),
+    });
+  }
+
   private normalizedAreaPolygon(areaId: string) {
     const area = MAP_AREAS.find((candidate) => candidate.id === areaId);
     return area ? new Phaser.Geom.Polygon(area.polygon.map((point) => ({ x: point.x * VIEW_WIDTH, y: point.y * VIEW_HEIGHT }))) : null;
@@ -495,6 +526,7 @@ export class FarmScene extends Phaser.Scene {
       if (this.fields.getFirstPlotWithState('Growing')) return 'Ainda não dá para colher: o trigo está crescendo. Encerre o dia mais uma vez para amadurecer.';
       return 'Não há trigo maduro para colher. Plante trigo e avance os dias até ficar maduro.';
     }
+    if (task === 'Milk Cow' && this.cowMilkedToday) return 'Esta vaca já foi ordenhada hoje. Encerre o dia para ordenhar novamente.';
     return null;
   }
 
@@ -554,10 +586,9 @@ export class FarmScene extends Phaser.Scene {
 
   private showCowAtBarn() {
     if (!this.cowSprite) return;
-    this.cowSprite.setVisible(true);
     this.tweens.killTweensOf(this.cowSprite);
-    this.cowSprite.setPosition(BARN_TARGET.x - 54, BARN_TARGET.y + 16).setAlpha(0.15);
-    this.tweens.add({ targets: this.cowSprite, alpha: 1, y: BARN_TARGET.y + 10, duration: 280, ease: 'Sine.easeOut' });
+    this.cowSprite.setVisible(true).setAlpha(1);
+    this.tweens.add({ targets: this.cowSprite, x: BARN_TARGET.x - 54, y: BARN_TARGET.y + 10, duration: 520, ease: 'Sine.easeInOut' });
   }
 
   private async runTask(worker: WorkerRuntime, task: TaskCommand) {
@@ -666,8 +697,11 @@ export class FarmScene extends Phaser.Scene {
       return 'Trigo colhido: produção virou estoque e o campo voltou ao solo bruto.';
     }
 
+    if (this.cowMilkedToday) return 'Esta vaca já foi ordenhada hoje. Encerre o dia para ordenhar novamente.';
+    this.cowMilkedToday = true;
     this.economy.addMilk(1);
-    return 'Leite produzido no Barn e adicionado ao estoque.';
+    this.scheduleCowWander();
+    return 'Leite produzido no curral e adicionado ao estoque. A vaca só poderá ser ordenhada novamente amanhã.';
   }
 
   private selectWorker(workerId: string, notify = true) {
@@ -688,6 +722,7 @@ export class FarmScene extends Phaser.Scene {
   private sellProduct(product: 'wheat' | 'milk') { this.publishState(this.economy.sell(product)); }
   private buySeeds() { this.publishState(this.economy.buySeeds()); }
   private nextDay() {
+    this.cowMilkedToday = false;
     const economyMessage = this.economy.nextDay();
     const grew = this.fields.advanceDay();
     this.redrawFields();
