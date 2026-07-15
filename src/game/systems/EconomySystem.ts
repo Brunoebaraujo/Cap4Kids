@@ -16,13 +16,13 @@ export class EconomySystem {
   useSeed() { if (this.inventory.seeds <= 0) return false; this.inventory.seeds -= 1; return true; }
   addWheat(amount: number) { this.inventory.wheat += amount; this.economy.wealthCreated += amount * this.economy.wheatPrice; }
   addMilk(amount: number) { this.inventory.milk += amount; this.economy.wealthCreated += amount * this.economy.milkPrice; }
-  buySeeds() {
+  buySeeds(crop: 'wheat' | 'rice' | 'tomato' | 'banana' = 'wheat') {
     const price = Math.ceil(3 * (1 + this.economy.inflationRate) ** this.economy.day);
     if (this.economy.coins < price) return `Você precisa de ${price} moedas.`;
     this.economy.coins -= price; this.inventory.seeds += 2;
     return `2 sementes compradas por ${price} moedas.`;
   }
-  sell(product: 'wheat' | 'milk') {
+  sell(product: 'wheat' | 'rice' | 'tomato' | 'banana' | 'milk') {
     const amount = this.inventory[product];
     if (!amount) return `Você não tem ${product === 'wheat' ? 'trigo' : 'leite'} para vender.`;
     const price = product === 'wheat' ? this.economy.wheatPrice : this.economy.milkPrice;
