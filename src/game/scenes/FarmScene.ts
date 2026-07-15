@@ -39,6 +39,8 @@ interface WorkerRuntime {
   name: string;
   tileX: number;
   tileY: number;
+  worldX: number;
+  worldY: number;
   sprite: Phaser.GameObjects.Sprite;
   selectionRing: Phaser.GameObjects.Graphics;
   nameLabel: Phaser.GameObjects.Text;
@@ -206,7 +208,7 @@ export class FarmScene extends Phaser.Scene {
     });
 
     const worker: WorkerRuntime = {
-      id, name, tileX, tileY, sprite, selectionRing, nameLabel, statusLabel,
+      id, name, tileX, tileY, worldX: x, worldY: y, sprite, selectionRing, nameLabel, statusLabel,
       tasks: new TaskSystem(), status: 'Idle', animationState: 'idle',
     };
     this.workers.set(id, worker);
@@ -272,6 +274,15 @@ export class FarmScene extends Phaser.Scene {
     }
   }
 
+  private moveSelectedWorkerToPoint(x: number, y: number) {
+    const worker = this.getSelectedWorker();
+    if (worker.status === 'Busy') {
+      this.publishState(`${worker.name} está ocupado. Aguarde a tarefa terminar.`);
+      return;
+    }
+    this.moveWorkerToPoint(worker, Phaser.Math.Clamp(x, 16, VIEW_WIDTH - 16), Phaser.Math.Clamp(y, 16, VIEW_HEIGHT - 16));
+  }
+
   private readDirection(): Direction | null {
     if (this.cursors.left.isDown || this.keys.A.isDown) return 'left';
     if (this.cursors.right.isDown || this.keys.D.isDown) return 'right';
@@ -284,10 +295,9 @@ export class FarmScene extends Phaser.Scene {
     if (worker.status === 'Moving') return;
     const deltas: Record<Direction, [number, number]> = { down: [0, 1], up: [0, -1], left: [-1, 0], right: [1, 0] };
     const [dx, dy] = deltas[direction];
-    const nextX = Phaser.Math.Clamp(worker.tileX + dx, 1, WORLD_WIDTH - 2);
-    const nextY = Phaser.Math.Clamp(worker.tileY + dy, 1, WORLD_HEIGHT - 2);
-    if (nextX === worker.tileX && nextY === worker.tileY) return;
-    this.moveWorkerTo(worker, nextX, nextY).then(() => {
+    const nextX = Phaser.Math.Clamp(worker.worldX + dx * 42, 16, VIEW_WIDTH - 16);
+    const nextY = Phaser.Math.Clamp(worker.worldY + dy * 42, 16, VIEW_HEIGHT - 16);
+    this.moveWorkerToPoint(worker, nextX, nextY).then(() => {
       if (!worker.tasks.currentTask) {
         worker.status = 'Idle';
         this.setWorkerAnimation(worker, 'idle');
@@ -316,7 +326,10 @@ export class FarmScene extends Phaser.Scene {
 
     const layout = this.fieldLayoutAt(pointer.worldX, pointer.worldY);
     const field = layout ? this.fields.getFieldById(layout.id) : null;
-    if (!field) return;
+    if (!field) {
+      this.moveSelectedWorkerToPoint(pointer.worldX, pointer.worldY);
+      return;
+    }
 
     const task = this.taskForFieldState(field.state);
     if (!task) {
@@ -445,9 +458,9 @@ export class FarmScene extends Phaser.Scene {
     });
   }
 
-  private moveWorkerTo(worker: WorkerRuntime, tileX: number, tileY: number) {
+  private moveWorkerToPoint(worker: WorkerRuntime, x: number, y: number) {
     return new Promise<void>((resolve) => {
-      if (worker.tileX === tileX && worker.tileY === tileY) {
+      if (Phaser.Math.Distance.Between(worker.sprite.x, worker.sprite.y, x, y) < 4) {
         resolve();
         return;
       }
@@ -457,6 +470,31 @@ export class FarmScene extends Phaser.Scene {
       this.updateWorkerVisuals(worker);
       this.publishState();
 
+      const distance = Phaser.Math.Distance.Between(worker.sprite.x, worker.sprite.y, x, y);
+      this.tweens.add({
+        targets: worker.sprite,
+        x,
+        y,
+        duration: Phaser.Math.Clamp(distance * 2.2, 180, 1600),
+        ease: 'Sine.easeInOut',
+        onUpdate: () => {
+          this.updateWorkerVisuals(worker, false);
+          this.positionWorkerLabels(worker);
+        },
+        onComplete: () => {
+          worker.worldX = x;
+          worker.worldY = y;
+          worker.tileX = Math.round(x);
+          worker.tileY = Math.round(y);
+          this.positionWorkerLabels(worker);
+          resolve();
+        },
+      });
+    });
+  }
+
+  private moveWorkerTo(worker: WorkerRuntime, tileX: number, tileY: number) {
+    return new Promise<void>((resolve) => {
       const distance = Math.max(Math.abs(worker.tileX - tileX), Math.abs(worker.tileY - tileY));
       const targetField = this.fields.getFieldAt(tileX, tileY);
       const layout = targetField ? FIELD_LAYOUTS.find((candidate) => candidate.id === targetField.id) : null;
@@ -465,22 +503,10 @@ export class FarmScene extends Phaser.Scene {
         ? { x: BARN_TARGET.x, y: BARN_TARGET.y }
         : layout ? fieldWorkPoint(layout, VIEW_WIDTH, VIEW_HEIGHT) : { x: this.isoToScreen(tileX, tileY)[0], y: this.isoToScreen(tileX, tileY)[1] };
 
-      this.tweens.add({
-        targets: worker.sprite,
-        x: target.x,
-        y: target.y,
-        duration: MOVE_DURATION * Math.max(1, distance),
-        ease: 'Linear',
-        onUpdate: () => {
-          this.updateWorkerVisuals(worker, false);
-          this.positionWorkerLabels(worker);
-        },
-        onComplete: () => {
-          worker.tileX = tileX;
-          worker.tileY = tileY;
-          this.positionWorkerLabels(worker);
-          resolve();
-        },
+      this.moveWorkerToPoint(worker, target.x, target.y).then(() => {
+        worker.tileX = tileX;
+        worker.tileY = tileY;
+        resolve();
       });
     });
   }
