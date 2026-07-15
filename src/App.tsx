@@ -24,10 +24,7 @@ const initialSnapshot: GameSnapshot = {
   selectedWorker: {
     id: 'maya',
     name: 'Maya',
-    position: {
-      x: 4,
-      y: 6,
-    },
+    position: { x: 4, y: 6 },
     status: 'Idle',
     currentTask: null,
     taskQueue: [],
@@ -35,32 +32,8 @@ const initialSnapshot: GameSnapshot = {
     isSelected: true,
   },
   workers: [
-    {
-      id: 'maya',
-      name: 'Maya',
-      position: {
-        x: 4,
-        y: 6,
-      },
-      status: 'Idle',
-      currentTask: null,
-      taskQueue: [],
-      animationState: 'idle',
-      isSelected: true,
-    },
-    {
-      id: 'worker-1',
-      name: 'Worker 1',
-      position: {
-        x: 10,
-        y: 6,
-      },
-      status: 'Idle',
-      currentTask: null,
-      taskQueue: [],
-      animationState: 'idle',
-      isSelected: false,
-    },
+    { id: 'maya', name: 'Maya', position: { x: 4, y: 6 }, status: 'Idle', currentTask: null, taskQueue: [], animationState: 'idle', isSelected: true },
+    { id: 'worker-1', name: 'Worker 1', position: { x: 10, y: 6 }, status: 'Idle', currentTask: null, taskQueue: [], animationState: 'idle', isSelected: false },
   ],
   currentTask: null,
   taskQueue: [],
@@ -82,33 +55,21 @@ function App() {
   const gameRootRef = useRef<HTMLDivElement | null>(null);
   const gameRef = useRef<Phaser.Game | null>(null);
   const [snapshot, setSnapshot] = useState(initialSnapshot);
-  const [notification, setNotification] = useState('Use arrows or WASD to move tile-by-tile.');
+  const [notification, setNotification] = useState('Selecione um trabalhador e clique em um campo.');
+  const [tutorialDismissed, setTutorialDismissed] = useState(false);
 
   useEffect(() => {
-    if (!gameRootRef.current || gameRef.current) {
-      return;
-    }
-
+    if (!gameRootRef.current || gameRef.current) return;
     gameRef.current = createGame(gameRootRef.current);
-
     return () => {
       gameRef.current?.destroy(true);
       gameRef.current = null;
     };
   }, []);
 
-  const requestTask = (task: TaskType) => {
-    gameEvents.emit('task', task);
-  };
-
-  const selectWorker = (workerId: string) => {
-    gameEvents.emit('selectWorker', workerId);
-  };
-
-  const findWorker = (workerId: string) => {
-    gameEvents.emit('findWorker', workerId);
-  };
-
+  const requestTask = (task: TaskType) => gameEvents.emit('task', task);
+  const selectWorker = (workerId: string) => gameEvents.emit('selectWorker', workerId);
+  const findWorker = (workerId: string) => gameEvents.emit('findWorker', workerId);
   const sell = (product: 'wheat' | 'milk') => gameEvents.emit('sell', product);
   const buySeeds = () => gameEvents.emit('buySeeds');
   const nextDay = () => gameEvents.emit('nextDay');
@@ -117,7 +78,12 @@ function App() {
 
   useEffect(() => {
     const handleState = (nextSnapshot: GameSnapshot) => setSnapshot(nextSnapshot);
-    const handleNotification = (message: string) => setNotification(message);
+    const handleNotification = (message: string) => {
+      if (message !== 'Selecione um trabalhador e clique no Campo 1 para preparar o solo.' && message !== 'Selecione um trabalhador e clique em um campo.') {
+        setTutorialDismissed(true);
+      }
+      setNotification(message);
+    };
 
     gameEvents.on('state', handleState);
     gameEvents.on('notification', handleNotification);
@@ -128,9 +94,12 @@ function App() {
     };
   }, []);
 
+  const showNotice = !tutorialDismissed || notification.length > 0;
+
   return (
     <main className="app-shell">
       <section className="game-panel" aria-label="Capitalism 4 Kids farm world">
+        {showNotice && <p className={tutorialDismissed ? 'map-notification' : 'map-notification tutorial'}>{notification}</p>}
         <div ref={gameRootRef} className="game-root" />
       </section>
 
@@ -147,18 +116,9 @@ function App() {
         <section className="hud-section">
           <h2>Economy</h2>
           <dl className="stat-grid">
-            <div>
-              <dt>Coins</dt>
-              <dd>{snapshot.economy.coins}</dd>
-            </div>
-            <div>
-              <dt>Debt</dt>
-              <dd>{snapshot.economy.debt}</dd>
-            </div>
-            <div>
-              <dt>Custo diário</dt>
-              <dd>{snapshot.economy.dailyHouseholdCost}</dd>
-            </div>
+            <div><dt>Coins</dt><dd>{snapshot.economy.coins}</dd></div>
+            <div><dt>Debt</dt><dd>{snapshot.economy.debt}</dd></div>
+            <div><dt>Custo diário</dt><dd>{snapshot.economy.dailyHouseholdCost}</dd></div>
           </dl>
           <div className="economy-strip">
             <span>Inflação <strong>{(snapshot.economy.inflationRate * 100).toFixed(1)}%</strong></span>
@@ -203,26 +163,12 @@ function App() {
             <button type="button" onClick={() => requestTask('Harvest Wheat')}>Harvest Wheat</button>
             <button type="button" onClick={() => requestTask('Milk Cow')}>Milk Cow</button>
           </div>
-          <div className="task-line">
-            <span>Selected Worker</span>
-            <strong>{snapshot.selectedWorker.name}</strong>
-          </div>
-          <div className="task-line">
-            <span>Status</span>
-            <strong>{snapshot.selectedWorker.status}</strong>
-          </div>
-          <div className="task-line">
-            <span>Current Task</span>
-            <strong>{snapshot.selectedWorker.currentTask?.type ?? 'Idle'}</strong>
-          </div>
-          <div className="task-line">
-            <span>Queue Length</span>
-            <strong>{snapshot.selectedWorker.taskQueue.length}</strong>
-          </div>
+          <div className="task-line"><span>Selected Worker</span><strong>{snapshot.selectedWorker.name}</strong></div>
+          <div className="task-line"><span>Status</span><strong>{snapshot.selectedWorker.status}</strong></div>
+          <div className="task-line"><span>Current Task</span><strong>{snapshot.selectedWorker.currentTask?.type ?? 'Idle'}</strong></div>
+          <div className="task-line"><span>Queue Length</span><strong>{snapshot.selectedWorker.taskQueue.length}</strong></div>
           <div className="queue">
-            {snapshot.selectedWorker.taskQueue.length > 0
-              ? snapshot.selectedWorker.taskQueue.map((task) => <span key={task.id}>{task.type}</span>)
-              : <span>Queue empty</span>}
+            {snapshot.selectedWorker.taskQueue.length > 0 ? snapshot.selectedWorker.taskQueue.map((task) => <span key={task.id}>{task.type}</span>) : <span>Queue empty</span>}
           </div>
         </section>
 
@@ -235,29 +181,19 @@ function App() {
                   <span>{worker.name}</span>
                   <strong>{worker.status} / Queue {worker.taskQueue.length}</strong>
                 </button>
-                <button type="button" className="find-worker" onClick={() => findWorker(worker.id)}>
-                  Find
-                </button>
+                <button type="button" className="find-worker" onClick={() => findWorker(worker.id)}>Find</button>
               </div>
             ))}
           </div>
+          <p className="prototype-note">O botão Find será substituído por minimapa/câmera com limites no mapa expansível.</p>
         </section>
 
         <section className="hud-section">
           <h2>Inventory</h2>
           <dl className="inventory">
-            <div>
-              <dt>Seeds</dt>
-              <dd>{snapshot.inventory.seeds}</dd>
-            </div>
-            <div>
-              <dt>Wheat</dt>
-              <dd>{snapshot.inventory.wheat}</dd>
-            </div>
-            <div>
-              <dt>Milk</dt>
-              <dd>{snapshot.inventory.milk}</dd>
-            </div>
+            <div><dt>Seeds</dt><dd>{snapshot.inventory.seeds}</dd></div>
+            <div><dt>Wheat</dt><dd>{snapshot.inventory.wheat}</dd></div>
+            <div><dt>Milk</dt><dd>{snapshot.inventory.milk}</dd></div>
           </dl>
         </section>
 
@@ -265,15 +201,10 @@ function App() {
           <h2>Fields</h2>
           <div className="fields">
             {snapshot.fields.map((field) => (
-              <div key={field.id} className="field-row">
-                <span>Field {field.id}</span>
-                <strong>{field.state}</strong>
-              </div>
+              <div key={field.id} className="field-row"><span>Field {field.id}</span><strong>{field.state}</strong></div>
             ))}
           </div>
         </section>
-
-        <p className="notification">{notification}</p>
       </aside>
     </main>
   );
