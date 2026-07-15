@@ -397,6 +397,20 @@ export class FarmScene extends Phaser.Scene {
     }
     this.cameraDragStart = undefined;
 
+    const shop = this.normalizedAreaPolygon('shop');
+    if (shop && Phaser.Geom.Polygon.Contains(shop, pointer.worldX, pointer.worldY)) {
+      const worker = this.getSelectedWorker();
+      const target = this.areaWorkPoint('shop') ?? { x: pointer.worldX, y: pointer.worldY };
+      this.moveWorkerToPoint(worker, target.x, target.y).then(() => {
+        worker.status = 'Idle';
+        this.setWorkerAnimation(worker, 'idle');
+        this.updateWorkerVisuals(worker);
+        this.publishState('Bem-vindo à lojinha. Escolha quais sementes comprar.');
+        emitGameEvent('openShop', undefined);
+      });
+      return;
+    }
+
     const hit = this.plotAt(pointer.worldX, pointer.worldY);
     const field = hit ? this.fields.getFieldById(hit.layout.id) : null;
     const plot = hit ? this.fields.getPlotById(hit.plotId) : null;
@@ -448,6 +462,11 @@ export class FarmScene extends Phaser.Scene {
       ease: 'Sine.easeInOut',
       onComplete: () => this.scheduleCowWander(),
     });
+  }
+
+  private areaWorkPoint(areaId: string) {
+    const area = MAP_AREAS.find((candidate) => candidate.id === areaId);
+    return area ? { x: area.workPoint.x * VIEW_WIDTH, y: area.workPoint.y * VIEW_HEIGHT } : null;
   }
 
   private normalizedAreaPolygon(areaId: string) {
@@ -720,7 +739,7 @@ export class FarmScene extends Phaser.Scene {
   }
 
   private sellProduct(product: 'wheat' | 'milk') { this.publishState(this.economy.sell(product)); }
-  private buySeeds() { this.publishState(this.economy.buySeeds()); }
+  private buySeeds(crop: 'wheat' | 'rice' | 'tomato' | 'banana' = 'wheat') { this.publishState(this.economy.buySeeds(crop)); }
   private nextDay() {
     this.cowMilkedToday = false;
     const economyMessage = this.economy.nextDay();
