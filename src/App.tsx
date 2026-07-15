@@ -221,7 +221,7 @@ function App() {
         <section className="hud-section">
           <h2>Inventory</h2>
           <dl className="inventory">
-            <div><dt>Seeds</dt><dd>{snapshot.inventory.seeds}</dd></div>
+            <div><dt>Seeds</dt><dd>{Object.values(snapshot.inventory.seeds).reduce((sum, value) => sum + value, 0)}</dd></div>
             <div><dt>Wheat</dt><dd>{snapshot.inventory.wheat}</dd></div>
             <div><dt>Milk</dt><dd>{snapshot.inventory.milk}</dd></div>
           </dl>
