@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { FarmScene } from './scenes/FarmScene';
+import { IsoFarmScene } from './scenes/IsoFarmScene';
 
 export function createGame(parent: HTMLElement) {
   return new Phaser.Game({
@@ -7,23 +7,15 @@ export function createGame(parent: HTMLElement) {
     parent,
     width: parent.clientWidth || window.innerWidth,
     height: parent.clientHeight || window.innerHeight,
-    pixelArt: true,
-    backgroundColor: '#2f6f43',
+    backgroundColor: '#243b1f',
     scale: {
       mode: Phaser.Scale.RESIZE,
       autoCenter: Phaser.Scale.NO_CENTER,
     },
     render: {
-      antialias: false,
-      pixelArt: true,
+      antialias: true,
       roundPixels: true,
     },
-    physics: {
-      default: 'arcade',
-      arcade: {
-        debug: false,
-      },
-    },
-    scene: [FarmScene],
+    scene: [IsoFarmScene],
   });
 }

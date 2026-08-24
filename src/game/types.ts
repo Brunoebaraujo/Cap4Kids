@@ -1,7 +1,3 @@
-export const TILE_SIZE = 32;
-
-export type Direction = 'down' | 'up' | 'left' | 'right';
-
 export type FieldState =
   | 'Empty'
   | 'Prepared'
@@ -12,11 +8,15 @@ export type FieldState =
   | 'Ready To Harvest'
   | 'Locked';
 
-export type TaskType = 'Prepare Soil' | 'Plant Wheat' | 'Harvest Wheat' | 'Deliver To Shipping Bin';
-
-export type AnimationState = 'idle' | 'walk' | 'prepare soil' | 'plant' | 'harvest' | 'deliver';
+export type TaskType =
+  | 'Prepare Soil'
+  | 'Plant Wheat'
+  | 'Harvest Wheat'
+  | 'Deliver To Shipping Bin';
 
 export type CameraMode = 'free' | 'followMaya';
+
+export type WorkerActivity = 'idle' | 'walking' | 'working';
 
 export interface Inventory {
   seeds: number;
@@ -55,14 +55,10 @@ export interface TaskProgressSnapshot {
   progress: number;
 }
 
-export interface MayaSnapshot {
-  animation: string;
-  direction: Direction;
-  x: number;
-  y: number;
-  frameWidth: number;
-  frameHeight: number;
-  state: AnimationState;
+export interface WorkerSnapshot {
+  tileX: number;
+  tileY: number;
+  activity: WorkerActivity;
 }
 
 export interface GameSnapshot {
@@ -71,17 +67,12 @@ export interface GameSnapshot {
   currentTask: TaskType | null;
   taskQueue: TaskType[];
   fields: FieldSnapshot[];
-  animationState: AnimationState;
   cameraMode: CameraMode;
-  maya: MayaSnapshot;
   clock: GameClockSnapshot;
   taskProgress: TaskProgressSnapshot;
+  worker: WorkerSnapshot;
+  selectedTile: { x: number; y: number } | null;
   lastSale: SaleSummary | null;
   wheatSeedCost: number;
   wheatPrice: number;
-}
-
-export interface GameEvents {
-  state: GameSnapshot;
-  notification: string;
 }

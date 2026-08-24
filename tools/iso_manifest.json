@@ -1,0 +1,191 @@
+{
+  "ground": {
+    "grass_00": {
+      "w": 128,
+      "h": 64,
+      "file": "ground/grass_00.png"
+    },
+    "grass_01": {
+      "w": 128,
+      "h": 64,
+      "file": "ground/grass_01.png"
+    },
+    "grass_02": {
+      "w": 128,
+      "h": 64,
+      "file": "ground/grass_02.png"
+    },
+    "grass_03": {
+      "w": 128,
+      "h": 64,
+      "file": "ground/grass_03.png"
+    },
+    "dirt": {
+      "w": 128,
+      "h": 64,
+      "file": "ground/dirt.png"
+    },
+    "path": {
+      "w": 128,
+      "h": 64,
+      "file": "ground/path.png"
+    },
+    "soil_plowed": {
+      "w": 128,
+      "h": 64,
+      "file": "ground/soil_plowed.png"
+    },
+    "soil_planted": {
+      "w": 128,
+      "h": 64,
+      "file": "ground/soil_planted.png"
+    },
+    "water": {
+      "w": 128,
+      "h": 64,
+      "file": "ground/water.png"
+    }
+  },
+  "sprites": {
+    "farmhouse": {
+      "w": 256,
+      "h": 186,
+      "footprint": 2,
+      "anchor": [
+        0.5,
+        1.0
+      ],
+      "file": "sprites/farmhouse.png"
+    },
+    "barn": {
+      "w": 256,
+      "h": 190,
+      "footprint": 2,
+      "anchor": [
+        0.5,
+        1.0
+      ],
+      "file": "sprites/barn.png"
+    },
+    "silo": {
+      "w": 128,
+      "h": 160,
+      "footprint": 1,
+      "anchor": [
+        0.5,
+        1.0
+      ],
+      "file": "sprites/silo.png"
+    },
+    "shipping_bin": {
+      "w": 128,
+      "h": 98,
+      "footprint": 1,
+      "anchor": [
+        0.5,
+        1.0
+      ],
+      "file": "sprites/shipping_bin.png"
+    },
+    "well": {
+      "w": 128,
+      "h": 94,
+      "footprint": 1,
+      "anchor": [
+        0.5,
+        1.0
+      ],
+      "file": "sprites/well.png"
+    },
+    "wheat_0": {
+      "w": 128,
+      "h": 112,
+      "footprint": 1,
+      "anchor": [
+        0.5,
+        1.0
+      ],
+      "file": "sprites/wheat_0.png"
+    },
+    "wheat_1": {
+      "w": 128,
+      "h": 112,
+      "footprint": 1,
+      "anchor": [
+        0.5,
+        1.0
+      ],
+      "file": "sprites/wheat_1.png"
+    },
+    "wheat_2": {
+      "w": 128,
+      "h": 112,
+      "footprint": 1,
+      "anchor": [
+        0.5,
+        1.0
+      ],
+      "file": "sprites/wheat_2.png"
+    },
+    "wheat_3": {
+      "w": 128,
+      "h": 112,
+      "footprint": 1,
+      "anchor": [
+        0.5,
+        1.0
+      ],
+      "file": "sprites/wheat_3.png"
+    },
+    "worker_maya": {
+      "w": 128,
+      "h": 104,
+      "footprint": 1,
+      "anchor": [
+        0.5,
+        1.0
+      ],
+      "file": "sprites/worker_maya.png"
+    },
+    "cow": {
+      "w": 128,
+      "h": 94,
+      "footprint": 1,
+      "anchor": [
+        0.5,
+        1.0
+      ],
+      "file": "sprites/cow.png"
+    },
+    "tree": {
+      "w": 128,
+      "h": 160,
+      "footprint": 1,
+      "anchor": [
+        0.5,
+        1.0
+      ],
+      "file": "sprites/tree.png"
+    },
+    "fence_ne": {
+      "w": 128,
+      "h": 104,
+      "footprint": 1,
+      "anchor": [
+        0.5,
+        1.0
+      ],
+      "file": "sprites/fence_ne.png"
+    },
+    "fence_nw": {
+      "w": 128,
+      "h": 104,
+      "footprint": 1,
+      "anchor": [
+        0.5,
+        1.0
+      ],
+      "file": "sprites/fence_nw.png"
+    }
+  }
+}

@@ -1,56 +1,57 @@
-# Capitalism 4 Kids
+# Cap4Kids — Capitalism 4 Kids
 
-A Vite, React, TypeScript, and Phaser pixel-art farming game foundation published with GitHub Pages.
+Jogo de fazenda isométrico que ensina conceitos econômicos para crianças.
+Vite + React + TypeScript + Phaser 3, publicado no GitHub Pages.
 
-React owns the HUD and interface panels. Phaser owns the entire farm world: tiles, sprites, movement, fields, animations, and interactions.
+React é dono do HUD e do painel de comando. Phaser é dono do mundo isométrico.
+A simulação (economia, campos, relógio, tarefas) não depende de nenhum dos dois.
 
-## Live Site
-
-After the GitHub Pages workflow finishes, the game is available at:
+## Live
 
 https://brunoebaraujo.github.io/Cap4Kids/
 
-## Run Locally
+## Rodar
 
 ```bash
 npm install
 npm run dev
 ```
 
-## Build
+## Comandos
 
 ```bash
-npm run build
+npm run test        # vitest (projeção isométrica)
+npm run build       # tsc + vite build
+npm run gen:assets  # regenera os placeholders isométricos
 ```
 
-## Deploy
+## Controles
 
-Pushes to `main` run `.github/workflows/pages.yml`, build the Vite app, and publish `dist` to GitHub Pages.
+- **Clique esquerdo** — seleciona um tile
+- **Botão direito ou do meio, arrastando** — move a câmera
+- **Roda do mouse** — zoom
+- **1** Preparar solo · **2** Plantar trigo · **3** Colher trigo · **4** Entregar no silo
+- **B** Comprar semente · **C** Alterna câmera livre / seguir
 
-## Current Foundation
+## Estado atual
 
-- Phaser renders the farm inside React.
-- The Phaser instance is stored in a React ref and is not recreated by HUD rerenders.
-- The farm world is composed from 32x32 tilemap layers using generated placeholder pixel tiles.
-- Maya is a placeholder pixel sprite with animation states.
-- Maya moves tile-by-tile with keyboard controls.
-- Field 1 starts unlocked and cycles Harvested -> Prepared -> Planted -> Harvested.
-- Field 2 starts locked and remains unavailable.
-- One worker task runs at a time; extra tasks enter a queue.
-- Inventory and economy state are reflected in the React HUD.
+Onda 1 concluída:
 
-## Controls
+- Renderer isométrico dimetrico 2:1, com projeção própria coberta por testes
+- Picking por mouse, hover e seleção de tile
+- Painel de comando estilo Age of Empires em CSS, com minimapa funcional
+- Barramento de comandos tipado entre React e Phaser
+- Manifesto de assets como contrato único para a troca de arte
+- Placeholders isométricos procedurais e regeneráveis
 
-- Arrow keys or WASD: move Maya one tile at a time.
-- Space: perform the context field action.
-- 1: Prepare Soil.
-- 2: Plant Wheat.
-- 3: Harvest Wheat.
-- 4: Milk Cow.
+## Próximas ondas
 
-## Docs
+2. Mercado com preço endógeno, inflação e juros sobre a dívida
+3. Sistema de gado
+4. Camada pedagógica (explicar *por que* o preço mudou)
+5. Troca dos placeholders pelo pack comprado (ver `docs/art-direction.md`)
 
-- `docs/vision.md`
-- `docs/art-direction.md`
+## Documentação
+
 - `docs/technical-architecture.md`
-- `docs/roadmap.md`
+- `docs/art-direction.md`

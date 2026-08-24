@@ -1,87 +1,54 @@
-import { useEffect, useRef, useState } from 'react';
-import mayaPortrait from './assets/characters/maya/portraits/maya-portrait.png';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import mayaPortrait from './assets/characters/maya/portraits/maya-portrait.webp';
+import { onNotice, onState, sendCommand, type Notice } from './game/commandBus';
 import { createGame } from './game/createGame';
-import { gameEvents } from './game/eventBus';
-import type { CameraMode, GameSnapshot, TaskType } from './game/types';
+import { MAP_COLS, MAP_ROWS } from './game/scenes/IsoFarmScene';
+import type { FieldState, GameSnapshot, TaskType } from './game/types';
 
 const taskLabels: Record<TaskType, string> = {
-  'Prepare Soil': 'Preparar Solo',
-  'Plant Wheat': 'Plantar Trigo',
-  'Harvest Wheat': 'Colher Trigo',
-  'Deliver To Shipping Bin': 'Entregar no Shipping Bin',
+  'Prepare Soil': 'Preparar solo',
+  'Plant Wheat': 'Plantar trigo',
+  'Harvest Wheat': 'Colher trigo',
+  'Deliver To Shipping Bin': 'Entregar no silo',
 };
 
-const taskKeys: Record<TaskType, string> = {
-  'Prepare Soil': '1',
-  'Plant Wheat': '2',
-  'Harvest Wheat': '3',
-  'Deliver To Shipping Bin': '4',
+const fieldLabels: Record<FieldState, string> = {
+  Empty: 'Vazio',
+  Prepared: 'Preparado',
+  Planted: 'Plantado',
+  'Growing Stage 1': 'Brotando',
+  'Growing Stage 2': 'Crescendo',
+  'Growing Stage 3': 'Quase pronto',
+  'Ready To Harvest': 'Pronto para colher',
+  Locked: 'Bloqueado',
 };
 
-const cameraLabels: Record<CameraMode, string> = {
-  free: 'Livre',
-  followMaya: 'Seguindo Maya',
-};
+const commands: Array<{ task: TaskType; hotkey: string; glyph: string }> = [
+  { task: 'Prepare Soil', hotkey: '1', glyph: 'ᐱ' },
+  { task: 'Plant Wheat', hotkey: '2', glyph: '•' },
+  { task: 'Harvest Wheat', hotkey: '3', glyph: '∩' },
+  { task: 'Deliver To Shipping Bin', hotkey: '4', glyph: '▤' },
+];
 
 const initialSnapshot: GameSnapshot = {
-  economy: {
-    coins: 0,
-    debt: 0,
-    dailyHouseholdCost: 0,
-    profitLoss: 0,
-  },
-  inventory: {
-    seeds: 0,
-    wheat: 0,
-    milk: 0,
-  },
+  economy: { coins: 40, debt: 250, dailyHouseholdCost: 8, profitLoss: 0 },
+  inventory: { seeds: 0, wheat: 0, milk: 0 },
   currentTask: null,
   taskQueue: [],
   fields: [],
-  animationState: 'idle',
   cameraMode: 'free',
-  maya: {
-    animation: 'idle_down',
-    direction: 'down',
-    x: 0,
-    y: 0,
-    frameWidth: 32,
-    frameHeight: 32,
-    state: 'idle',
-  },
-  clock: {
-    day: 1,
-    minuteOfDay: 6 * 60,
-    dailyCostCountdownSeconds: 180,
-    isRunning: true,
-  },
-  taskProgress: {
-    task: null,
-    progress: 0,
-  },
+  clock: { day: 1, minuteOfDay: 360, dailyCostCountdownSeconds: 180, isRunning: true },
+  taskProgress: { task: null, progress: 0 },
+  worker: { tileX: 10, tileY: 11, activity: 'idle' },
+  selectedTile: null,
   lastSale: null,
   wheatSeedCost: 2,
   wheatPrice: 3,
 };
 
-function dispatchKey(key: string) {
-  const upper = key.toUpperCase();
-  const code = /^\d$/.test(key) ? `Digit${key}` : `Key${upper}`;
-  window.dispatchEvent(new KeyboardEvent('keydown', { key, code, bubbles: true }));
-  window.dispatchEvent(new KeyboardEvent('keyup', { key, code, bubbles: true }));
-}
-
-function dispatchTaskKey(task: TaskType) {
-  dispatchKey(taskKeys[task]);
-}
-
-function formatTask(task: TaskType | null) {
-  return task ? taskLabels[task] : 'Livre';
-}
-
 function formatTime(minuteOfDay: number) {
   const hours = Math.floor(minuteOfDay / 60) % 24;
-  const minutes = minuteOfDay % 60;
+  const minutes = Math.floor(minuteOfDay % 60);
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 }
 
@@ -89,17 +56,34 @@ function formatSigned(value: number) {
   return value > 0 ? `+${value}` : String(value);
 }
 
+function Minimap({ snapshot }: { snapshot: GameSnapshot }) {
+  const project = (tx: number, ty: number) => ({
+    x: 50 + ((tx - ty) / (MAP_COLS + MAP_ROWS)) * 92,
+    y: 6 + ((tx + ty) / (MAP_COLS + MAP_ROWS)) * 88,
+  });
+  const worker = project(snapshot.worker.tileX, snapshot.worker.tileY);
+  const corners = [project(0, 0), project(MAP_COLS, 0), project(MAP_COLS, MAP_ROWS), project(0, MAP_ROWS)];
+
+  return (
+    <svg viewBox="0 0 100 100" className="minimap-canvas" role="img" aria-label="Minimapa da fazenda">
+      <polygon points={corners.map((p) => `${p.x},${p.y}`).join(' ')} fill="#3d6b32" stroke="#8a7554" strokeWidth="1" />
+      <circle cx={worker.x} cy={worker.y} r="2.6" fill="#ffd166" stroke="#5a4028" strokeWidth="0.8" />
+    </svg>
+  );
+}
+
 export default function App() {
   const gameRootRef = useRef<HTMLDivElement | null>(null);
   const gameRef = useRef<ReturnType<typeof createGame> | null>(null);
   const [snapshot, setSnapshot] = useState<GameSnapshot>(initialSnapshot);
-  const [notification, setNotification] = useState('Bem-vindo a Capitalism 4 Kids.');
+  const [notice, setNotice] = useState<Notice>({
+    text: 'Bem-vindo ao Cap4Kids.',
+    tone: 'info',
+  });
 
   useEffect(() => {
     if (!gameRootRef.current || gameRef.current) return;
-
     gameRef.current = createGame(gameRootRef.current);
-
     return () => {
       gameRef.current?.destroy(true);
       gameRef.current = null;
@@ -107,193 +91,141 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const preventGameKeyScroll = (event: KeyboardEvent) => {
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(event.code)) {
-        event.preventDefault();
-      }
-    };
-
-    window.addEventListener('keydown', preventGameKeyScroll);
-    return () => window.removeEventListener('keydown', preventGameKeyScroll);
-  }, []);
-
-  useEffect(() => {
-    const handleState = (state: GameSnapshot) => setSnapshot(state);
-    const handleNotification = (message: string) => setNotification(message);
-
-    gameEvents.on('state', handleState);
-    gameEvents.on('notification', handleNotification);
-
+    const offState = onState(setSnapshot);
+    const offNotice = onNotice(setNotice);
     return () => {
-      gameEvents.off('state', handleState);
-      gameEvents.off('notification', handleNotification);
+      offState();
+      offNotice();
     };
   }, []);
 
-  const queuedTasks = snapshot.taskQueue.length
-    ? snapshot.taskQueue.map((task) => taskLabels[task]).join(' -> ')
-    : 'Vazia';
-  const firstField = snapshot.fields[0];
-  const taskProgressPercent = Math.round(snapshot.taskProgress.progress * 100);
+  const progressPercent = Math.round(snapshot.taskProgress.progress * 100);
+  const queue = useMemo(
+    () => [snapshot.currentTask, ...snapshot.taskQueue].filter(Boolean) as TaskType[],
+    [snapshot.currentTask, snapshot.taskQueue],
+  );
 
   return (
     <main className="app-shell">
-      <div ref={gameRootRef} className="world-layer" aria-label="Mundo da fazenda" />
+      <div ref={gameRootRef} className="world-layer" aria-label="Mundo isométrico da fazenda" />
 
-      <section className="top-panel" aria-label="Painel principal">
-        <div className="maya-profile">
-          <img src={mayaPortrait} alt="Retrato da Maya" className="maya-portrait" />
-          <div>
-            <p className="eyebrow">Capitalism 4 Kids</p>
-            <h1>Fazenda da Maya</h1>
+      <header className="resource-bar">
+        <span className="resource"><i className="res-dot res-coin" />{snapshot.economy.coins}</span>
+        <span className="resource"><i className="res-dot res-debt" />{snapshot.economy.debt}</span>
+        <span className="resource"><i className="res-dot res-wheat" />{snapshot.inventory.wheat}</span>
+        <span className="resource"><i className="res-dot res-seed" />{snapshot.inventory.seeds}</span>
+        <span className="resource-divider" />
+        <span className="resource-label">Dia {snapshot.clock.day}</span>
+        <span className="resource-label">{formatTime(snapshot.clock.minuteOfDay)}</span>
+        <span className="resource-divider" />
+        <span className="resource-label">Trigo vale {snapshot.wheatPrice}</span>
+        <span className={snapshot.economy.profitLoss >= 0 ? 'resource-good' : 'resource-bad'}>
+          {formatSigned(snapshot.economy.profitLoss)}
+        </span>
+      </header>
+
+      <p className={`notice notice-${notice.tone}`} role="status">{notice.text}</p>
+
+      <section className="command-panel">
+        <div className="portrait-block">
+          <div className="portrait-frame">
+            <img src={mayaPortrait} alt="Retrato da Maya" />
+          </div>
+          <div className="nameplate">Maya</div>
+          <div className="activity">
+            {snapshot.worker.activity === 'working'
+              ? 'Trabalhando'
+              : snapshot.worker.activity === 'walking'
+                ? 'A caminho'
+                : 'Parada'}
           </div>
         </div>
 
-        <div className="hud-grid" aria-label="Resumo da economia">
-          <div className="hud-card">
-            <span>Moedas</span>
-            <strong>{snapshot.economy.coins}</strong>
+        <div className="command-grid">
+          {commands.map(({ task, hotkey, glyph }) => (
+            <button
+              key={task}
+              type="button"
+              className="command-button"
+              title={taskLabels[task]}
+              onClick={() => sendCommand({ type: 'queueTask', task })}
+            >
+              <span className="command-hotkey">{hotkey}</span>
+              <span className="command-glyph" aria-hidden="true">{glyph}</span>
+              <span className="command-label">{taskLabels[task]}</span>
+            </button>
+          ))}
+          <button
+            type="button"
+            className="command-button"
+            onClick={() => sendCommand({ type: 'buySeed' })}
+          >
+            <span className="command-hotkey">B</span>
+            <span className="command-glyph" aria-hidden="true">+</span>
+            <span className="command-label">Semente ({snapshot.wheatSeedCost})</span>
+          </button>
+          <button
+            type="button"
+            className="command-button"
+            onClick={() => sendCommand({ type: 'sellWheat' })}
+          >
+            <span className="command-hotkey">V</span>
+            <span className="command-glyph" aria-hidden="true">$</span>
+            <span className="command-label">Vender trigo</span>
+          </button>
+        </div>
+
+        <div className="queue-block">
+          <h2>Fila de tarefas</h2>
+          {queue.length === 0 ? (
+            <p className="queue-empty">Nenhuma tarefa.</p>
+          ) : (
+            <ul className="queue-list">
+              {queue.map((task, index) => (
+                <li key={`${task}-${index}`} className={index === 0 ? 'queue-active' : undefined}>
+                  {index === 0 && (
+                    <span className="queue-progress" style={{ width: `${progressPercent}%` }} />
+                  )}
+                  <span className="queue-text">{taskLabels[task]}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="field-strip">
+            {snapshot.fields.map((field) => (
+              <span key={field.id} className="field-chip">
+                Campo {field.id}: {fieldLabels[field.state]}
+              </span>
+            ))}
           </div>
-          <div className="hud-card">
-            <span>Dívida</span>
-            <strong>{snapshot.economy.debt}</strong>
+          <button type="button" className="ghost-button" onClick={() => sendCommand({ type: 'cancelQueue' })}>
+            Limpar fila
+          </button>
+        </div>
+
+        <div className="minimap-block">
+          <div className="minimap-frame">
+            <Minimap snapshot={snapshot} />
           </div>
-          <div className="hud-card">
-            <span>Custo diário</span>
-            <strong>{snapshot.economy.dailyHouseholdCost}</strong>
-          </div>
-          <div className="hud-card">
-            <span>Lucro/Prejuízo</span>
-            <strong>{formatSigned(snapshot.economy.profitLoss)}</strong>
-          </div>
-          <div className="hud-card">
-            <span>Dia</span>
-            <strong>{snapshot.clock.day}</strong>
-          </div>
-          <div className="hud-card">
-            <span>Hora</span>
-            <strong>{formatTime(snapshot.clock.minuteOfDay)}</strong>
+          <div className="minimap-actions">
+            <button type="button" className="ghost-button" onClick={() => sendCommand({ type: 'centerOnWorker' })}>
+              Centralizar
+            </button>
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() =>
+                sendCommand({
+                  type: 'setCameraMode',
+                  mode: snapshot.cameraMode === 'free' ? 'followMaya' : 'free',
+                })
+              }
+            >
+              {snapshot.cameraMode === 'free' ? 'Seguir' : 'Livre'}
+            </button>
           </div>
         </div>
       </section>
-
-      <aside className="side-panel left-panel" aria-label="Controles da fazenda">
-        <div className="panel-block">
-          <h2>Ações</h2>
-          <div className="action-grid">
-            <button type="button" onClick={() => dispatchKey('b')}>
-              Comprar Semente ({snapshot.wheatSeedCost})
-            </button>
-            {(Object.keys(taskLabels) as TaskType[]).map((task) => (
-              <button key={task} type="button" onClick={() => dispatchTaskKey(task)}>
-                {taskLabels[task]}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="panel-block">
-          <h2>Tarefa atual</h2>
-          <p className="status-line">{formatTask(snapshot.currentTask)}</p>
-          <div className="progress-shell" aria-label="Progresso da tarefa">
-            <div className="progress-fill" style={{ width: `${taskProgressPercent}%` }} />
-          </div>
-          <p className="tiny-line">{snapshot.taskProgress.task ? `${taskProgressPercent}%` : 'Sem tarefa em progresso'}</p>
-        </div>
-
-        <div className="panel-block">
-          <h2>Fila</h2>
-          <p className="status-line">{queuedTasks}</p>
-        </div>
-
-        <div className="panel-block debug-panel">
-          <h2>Debug</h2>
-          <dl className="debug-list">
-            <div>
-              <dt>Tarefa</dt>
-              <dd>{formatTask(snapshot.currentTask)}</dd>
-            </div>
-            <div>
-              <dt>Camera</dt>
-              <dd>{cameraLabels[snapshot.cameraMode]}</dd>
-            </div>
-            <div>
-              <dt>Dia</dt>
-              <dd>{snapshot.clock.day}</dd>
-            </div>
-            <div>
-              <dt>Hora</dt>
-              <dd>{formatTime(snapshot.clock.minuteOfDay)}</dd>
-            </div>
-            <div>
-              <dt>Campo</dt>
-              <dd>{firstField?.state ?? 'Sem campo'}</dd>
-            </div>
-            <div>
-              <dt>Maya</dt>
-              <dd>{snapshot.maya.animation}</dd>
-            </div>
-          </dl>
-        </div>
-      </aside>
-
-      <aside className="side-panel right-panel" aria-label="Inventário">
-        <div className="panel-block">
-          <h2>Tempo</h2>
-          <p className="status-line">{snapshot.clock.isRunning ? 'Tempo ativo' : 'Tempo pausado'}</p>
-          <p className="tiny-line">Próximo custo em {snapshot.clock.dailyCostCountdownSeconds}s ativos</p>
-        </div>
-
-        <div className="panel-block">
-          <h2>Inventário</h2>
-          <dl className="inventory-list">
-            <div>
-              <dt>Sementes</dt>
-              <dd>{snapshot.inventory.seeds}</dd>
-            </div>
-            <div>
-              <dt>Trigo</dt>
-              <dd>{snapshot.inventory.wheat}</dd>
-            </div>
-            <div>
-              <dt>Preço trigo</dt>
-              <dd>{snapshot.wheatPrice}</dd>
-            </div>
-          </dl>
-        </div>
-
-        <div className="panel-block">
-          <h2>Venda</h2>
-          <dl className="inventory-list">
-            <div>
-              <dt>Qtd.</dt>
-              <dd>{snapshot.lastSale?.quantity ?? 0}</dd>
-            </div>
-            <div>
-              <dt>Preço</dt>
-              <dd>{snapshot.lastSale?.unitPrice ?? snapshot.wheatPrice}</dd>
-            </div>
-            <div>
-              <dt>Total</dt>
-              <dd>{snapshot.lastSale?.totalEarned ?? 0}</dd>
-            </div>
-          </dl>
-        </div>
-
-        <div className="panel-block">
-          <h2>Campos</h2>
-          <dl className="field-list">
-            {snapshot.fields.map((field) => (
-              <div key={field.id}>
-                <dt>Campo {field.id}</dt>
-                <dd>{field.state}</dd>
-              </div>
-            ))}
-          </dl>
-        </div>
-      </aside>
-
-      <p className="notification">{notification}</p>
     </main>
   );
 }

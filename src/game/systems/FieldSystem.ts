@@ -14,8 +14,8 @@ export type FieldSaveState = Array<Pick<FieldRecord, 'id' | 'state' | 'growthEla
 
 export class FieldSystem {
   private readonly fields: FieldRecord[] = [
-    { id: 1, tileX: 24, tileY: 42, state: 'Empty', growthElapsedSeconds: 0 },
-    { id: 2, tileX: 28, tileY: 72, state: 'Locked', growthElapsedSeconds: 0 },
+    { id: 1, tileX: 15, tileY: 16, state: 'Empty', growthElapsedSeconds: 0 },
+    { id: 2, tileX: 21, tileY: 20, state: 'Locked', growthElapsedSeconds: 0 },
   ];
 
   get snapshots(): FieldSnapshot[] {
