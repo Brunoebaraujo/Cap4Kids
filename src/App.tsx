@@ -3,7 +3,9 @@ import mayaPortrait from './assets/characters/maya/portraits/maya-portrait.webp'
 import { onNotice, onState, sendCommand, type Notice } from './game/commandBus';
 import { createGame } from './game/createGame';
 import { MAP_COLS, MAP_ROWS } from './game/scenes/IsoFarmScene';
-import type { FieldState, GameSnapshot, Lesson, MarketGoodSnapshot, SeasonReport, TaskType } from './game/types';
+import type {
+  CatchUpReport, FieldState, GameSnapshot, Lesson, MarketGoodSnapshot, SeasonReport, TaskType,
+} from './game/types';
 
 const taskLabels: Record<TaskType, string> = {
   'Prepare Soil': 'Preparar solo',
@@ -42,8 +44,8 @@ const initialSnapshot: GameSnapshot = {
   fields: [],
   cameraMode: 'free',
   clock: {
-    day: 1, dayFraction: 0, minuteOfDay: 360, speed: 1,
-    season: 'Primavera', seasonNumber: 1, dayOfSeason: 1, daysPerSeason: 10,
+    day: 1, season: 'Primavera', seasonNumber: 1, dayOfSeason: 1, daysPerSeason: 7,
+    year: 1, dayOfYear: 1, daysPerYear: 28, msUntilNextDay: 0,
   },
   taskProgress: { task: null, progress: 0 },
   worker: { tileX: 10, tileY: 11, activity: 'idle' },
@@ -55,12 +57,21 @@ const initialSnapshot: GameSnapshot = {
   inflation: { index: 100, dailyRatePercent: 1.2, accumulatedPercent: 0 },
   lessons: [],
   seasonReports: [],
+  tech: {
+    tierId: 'manual', tierLabel: 'Manual',
+    description: 'Só as mãos.', capacity: 2, workRemaining: 2,
+    nextTierLabel: 'Ferramentas simples', nextCapacity: 3,
+    upgradeCost: 140, paybackDays: null,
+  },
+  land: { unlocked: 1, total: 9, nextCost: 120, fieldsNeededForCapacity: 2 },
+  catchUp: null,
 };
 
-function formatTime(minuteOfDay: number) {
-  const h = Math.floor(minuteOfDay / 60) % 24;
-  const m = Math.floor(minuteOfDay % 60);
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+function formatCountdown(ms: number) {
+  const totalMin = Math.max(0, Math.floor(ms / 60000));
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return h > 0 ? `${h}h${String(m).padStart(2, '0')}` : `${m}min`;
 }
 
 function Sparkline({ good }: { good: MarketGoodSnapshot }) {
@@ -77,6 +88,49 @@ function Sparkline({ good }: { good: MarketGoodSnapshot }) {
     <svg viewBox="0 0 60 16" className="spark" aria-hidden="true">
       <polyline points={path} fill="none" stroke="#4a7c3f" strokeWidth="1.4" />
     </svg>
+  );
+}
+
+function CatchUpCard({ report, onClose }: { report: CatchUpReport; onClose: () => void }) {
+  const total = report.days.reduce(
+    (acc, d) => ({
+      revenue: acc.revenue + d.revenue,
+      expenses: acc.expenses + d.expenses,
+      interest: acc.interest + d.interest,
+    }),
+    { revenue: 0, expenses: 0, interest: 0 },
+  );
+  return (
+    <div className="season-card" role="dialog" aria-labelledby="catchup-title">
+      <span className="lesson-concept">Enquanto você esteve fora</span>
+      <h3 id="catchup-title">
+        {report.daysProcessed === 1 ? 'Passou 1 dia' : `Passaram ${report.daysProcessed} dias`}
+      </h3>
+      <dl className="season-grid">
+        <div><dt>Receita</dt><dd className="good">+{total.revenue}</dd></div>
+        <div><dt>Despesas</dt><dd className="bad">-{total.expenses}</dd></div>
+        <div><dt>Juros da dívida</dt><dd className="bad">{total.interest}</dd></div>
+        <div><dt>Trigo hoje</dt><dd>{report.days[report.days.length - 1]?.wheatPrice ?? '—'}</dd></div>
+      </dl>
+      {report.daysForgiven > 0 && (
+        <p className="season-note forgiven">
+          Você ficou {report.daysForgiven + report.daysProcessed} dias sem aparecer. A fazenda
+          esperou por você: só {report.daysProcessed} dias foram cobrados. A lavoura pronta
+          não estragou.
+        </p>
+      )}
+      <ul className="catchup-days">
+        {report.days.map((d) => (
+          <li key={d.day}>
+            <span className="catchup-day">Dia {d.day}</span>
+            <span className="good">+{d.revenue}</span>
+            <span className="bad">-{d.expenses}</span>
+            <span className="catchup-price">trigo {d.wheatPrice}</span>
+          </li>
+        ))}
+      </ul>
+      <button type="button" className="ghost-button" onClick={onClose}>Começar o dia</button>
+    </div>
   );
 }
 
@@ -185,22 +239,11 @@ export default function App() {
         <span className="resource"><i className="res-dot res-seed" />{snapshot.inventory.seeds}</span>
         <span className="resource-divider" />
         <span className="resource-label">Dia {snapshot.clock.day}</span>
-        <span className="resource-label">{formatTime(snapshot.clock.minuteOfDay)}</span>
         <span className="resource-season">
           {snapshot.clock.season} · {snapshot.clock.dayOfSeason}/{snapshot.clock.daysPerSeason}
         </span>
-        <span className="speed-group" role="group" aria-label="Velocidade do tempo">
-          {[0, 1, 2, 3].map((sp) => (
-            <button
-              key={sp}
-              type="button"
-              className={`speed-button${snapshot.clock.speed === sp ? ' speed-active' : ''}`}
-              title={sp === 0 ? 'Pausar (espaço)' : `Velocidade ${sp}x`}
-              onClick={() => sendCommand({ type: 'setSpeed', speed: sp })}
-            >
-              {sp === 0 ? '❚❚' : `${sp}×`}
-            </button>
-          ))}
+        <span className="resource-label" title="Tempo até o próximo dia">
+          Novo dia em {formatCountdown(snapshot.clock.msUntilNextDay)}
         </span>
         <span className="resource-divider" />
         <span className="resource-label" title="Inflação acumulada desde o dia 1">
@@ -223,6 +266,55 @@ export default function App() {
           <button type="button" className="ghost-button" onClick={() => sendCommand({ type: 'repayDebt', amount: 25 })}>
             Abater 25 da dívida
           </button>
+        </section>
+
+        <section className="side-panel">
+          <h2>Trabalho de hoje</h2>
+          <div className="work-meter" role="img"
+               aria-label={`${snapshot.tech.workRemaining} de ${snapshot.tech.capacity} restantes`}>
+            {Array.from({ length: snapshot.tech.capacity }, (_, i) => (
+              <span key={i} className={`work-pip${i < snapshot.tech.workRemaining ? ' work-pip-free' : ''}`} />
+            ))}
+          </div>
+          <p className="work-count">
+            {snapshot.tech.workRemaining} de {snapshot.tech.capacity} restantes
+          </p>
+          <p className="tech-tier">{snapshot.tech.tierLabel}</p>
+          <p className="panel-hint">{snapshot.tech.description}</p>
+          <div className="land-row">
+            <span>Campos</span>
+            <strong>{snapshot.land.unlocked} / {snapshot.land.total}</strong>
+          </div>
+          {snapshot.land.unlocked < snapshot.land.fieldsNeededForCapacity && (
+            <p className="panel-warn">
+              Suas ferramentas dão conta de {snapshot.land.fieldsNeededForCapacity} campos.
+              Com {snapshot.land.unlocked}, parte do seu trabalho está sobrando.
+            </p>
+          )}
+          {snapshot.land.nextCost !== null && (
+            <button type="button" className="land-button"
+                    onClick={() => sendCommand({ type: 'buyLand' })}>
+              Comprar campo — {snapshot.land.nextCost}
+            </button>
+          )}
+          {snapshot.tech.upgradeCost !== null && (
+            <>
+              <button type="button" className="upgrade-button"
+                      onClick={() => sendCommand({ type: 'upgradeTech' })}>
+                {snapshot.tech.nextTierLabel} — {snapshot.tech.upgradeCost}
+              </button>
+              <p className="panel-hint">
+                Passa de {snapshot.tech.capacity} para {snapshot.tech.nextCapacity} de trabalho por dia.
+                {snapshot.tech.paybackDays !== null
+                  ? ` Se paga em cerca de ${snapshot.tech.paybackDays} dias.`
+                  : ''}
+                {snapshot.tech.nextCapacity !== null
+                  && snapshot.land.unlocked < snapshot.land.fieldsNeededForCapacity
+                  ? ' Mas sem mais campos, essa capacidade extra fica parada.'
+                  : ''}
+              </p>
+            </>
+          )}
         </section>
 
         <section className="side-panel">
@@ -250,17 +342,23 @@ export default function App() {
         </button>
       </aside>
 
-      {pendingReport && (
+      {snapshot.catchUp && (
+        <CatchUpCard
+          report={snapshot.catchUp}
+          onClose={() => sendCommand({ type: 'acknowledgeCatchUp' })}
+        />
+      )}
+
+      {!snapshot.catchUp && pendingReport && (
         <SeasonReportCard
           report={pendingReport}
           onClose={() => {
             setSeenReports(snapshot.seasonReports.length);
-            sendCommand({ type: 'setSpeed', speed: 1 });
           }}
         />
       )}
 
-      {!pendingReport && activeLesson && (
+      {!snapshot.catchUp && !pendingReport && activeLesson && (
         <div className="lesson-card" role="dialog" aria-labelledby="lesson-title">
           <span className="lesson-concept">{activeLesson.concept}</span>
           <h3 id="lesson-title">{activeLesson.title}</h3>

@@ -32,7 +32,6 @@ npm run gen:assets  # regenera os placeholders isométricos
 - **Roda do mouse** — zoom
 - **1** Preparar solo · **2** Plantar trigo · **3** Colher trigo · **4** Entregar no silo
 - **B** Comprar semente · **V** Vender trigo · **C** Alterna câmera
-- **Espaço** Pausa / retoma
 
 ## Estado atual
 
@@ -48,12 +47,15 @@ Ondas 1 e 2 concluídas.
 - Diário de aprendizado
 - 38 testes, incluindo 5 partidas simuladas de balanceamento
 
-**Onda 3a — ritmo**
+**Onda 3 — tempo de calendário e investimento**
 
-- Toda a simulação em dias de jogo, com uma única autoridade de tempo
-- Controle de velocidade (pausa, 1×, 2×, 3×) sem afetar balanceamento
-- Estações de 10 dias como capítulos, com balanço ao fechar
-- 46 testes
+- Um dia de jogo = um dia real, virando à meia-noite local
+- Estação de 7 dias, ano de 28 dias, lavoura de 4 dias
+- Capacidade de trabalho por dia com 5 níveis de tecnologia
+- Terra comprável: 9 campos, complementares à tecnologia
+- Painel com payback do investimento em dias
+- Resumo de "enquanto você esteve fora", com teto de 5 dias de ausência
+- 67 testes
 
 **Onda 1 — fundação isométrica**
 

@@ -84,13 +84,53 @@ export type Season = 'Primavera' | 'Verão' | 'Outono' | 'Inverno';
 
 export interface GameClockSnapshot {
   day: number;
-  dayFraction: number;
-  minuteOfDay: number;
-  speed: number;
   season: Season;
   seasonNumber: number;
   dayOfSeason: number;
   daysPerSeason: number;
+  year: number;
+  dayOfYear: number;
+  daysPerYear: number;
+  msUntilNextDay: number;
+}
+
+export type TechTierId = 'manual' | 'simple' | 'medium' | 'advanced' | 'mechanized';
+
+export interface LandSnapshot {
+  unlocked: number;
+  total: number;
+  nextCost: number | null;
+  /** Campos necessarios para usar a capacidade de trabalho atual. */
+  fieldsNeededForCapacity: number;
+}
+
+export interface TechSnapshot {
+  tierId: TechTierId;
+  tierLabel: string;
+  description: string;
+  capacity: number;
+  workRemaining: number;
+  nextTierLabel: string | null;
+  nextCapacity: number | null;
+  upgradeCost: number | null;
+  paybackDays: number | null;
+}
+
+export interface DayReport {
+  day: number;
+  season: Season;
+  revenue: number;
+  expenses: number;
+  interest: number;
+  harvested: number;
+  debtEnd: number;
+  wheatPrice: number;
+}
+
+export interface CatchUpReport {
+  daysProcessed: number;
+  daysForgiven: number;
+  days: DayReport[];
 }
 
 export interface SeasonReport {
@@ -137,4 +177,7 @@ export interface GameSnapshot {
   inflation: InflationSnapshot;
   lessons: Lesson[];
   seasonReports: SeasonReport[];
+  tech: TechSnapshot;
+  land: LandSnapshot;
+  catchUp: CatchUpReport | null;
 }

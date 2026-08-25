@@ -64,36 +64,62 @@ criança vê no painel.
 painel de Indicadores. Vender não basta: se o custo de produzir supera a receita,
 a fazenda perde dinheiro.
 
-## Tempo e ritmo
+## Tempo — calendário real
 
-**Toda a simulação é expressa em dias de jogo.** `GameClockSystem` é o único
-lugar que sabe quantos segundos reais dura um dia (`REAL_SECONDS_PER_DAY = 60`).
+**Um dia de jogo = um dia de calendário real.** A virada acontece na meia-noite
+local, não 24h após a primeira sessão — assim "volte amanhã" significa
+literalmente amanhã.
 
-Antes do refactor, o crescimento da lavoura (72s) e a duração do dia (180s) eram
-constantes independentes em segundos reais. Encurtar o dia para melhorar o ritmo
-fazia os custos diários baterem 3× mais vezes por colheita e destruía o
-balanceamento. Agora a duração do dia é um botão de ritmo puro: `clock.test.ts`
-prova que a lavoura leva o mesmo número de **dias** em qualquer velocidade.
+O dia **não corre durante a sessão**. A criança entra, vê o que aconteceu, decide,
+e sai. Nada fica esperando timer.
 
-Controle de velocidade: pausa, 1×, 2×, 3× (barra de espaço pausa). Multiplicar o
-tempo não altera nenhuma proporção, então acelerar nunca muda o resultado
-econômico de uma estratégia — só quanto o jogador vê por sessão.
+| Unidade | Duração real |
+|---------|--------------|
+| Dia | 1 dia |
+| Estação | 7 dias (uma semana) |
+| Ano | 28 dias (~um mês) |
+| Ciclo de lavoura | 4 dias |
 
-| Sessão | Dias | Inflação sentida | Estações |
-|--------|------|------------------|----------|
-| 20 min a 1× | 20 | 15% | 2 |
-| 20 min a 2× | 40 | 32% | 4 |
-| 20 min a 3× | 60 | 52% | 6 |
+### Proteção contra ausência
 
-Antes, 20 minutos rendiam ~7 dias e 5% de inflação — imperceptível. O conceito
-mais difícil de ensinar simplesmente não chegava ao jogador.
+`MAX_CATCHUP_DAYS = 5`. Quem some por três semanas volta e só tem 5 dias
+cobrados; o resto é perdoado e a lavoura pronta não estraga. Punir criança por
+não abrir o app não ensina economia, ensina que o jogo é hostil.
 
-## Estações como capítulos
+## Tecnologia — investir em eficiência
 
-Dez dias formam uma estação. Ao fechar, o jogo **pausa sozinho** e mostra o
-balanço: receita, despesas, lucro, juros pagos, variação da dívida e quanto os
-preços subiram. É o momento pedagógico mais forte do jogo, porque conecta as
-decisões da estação inteira a um número só.
+Tecnologia aumenta **quanto você trabalha por dia**, nunca a velocidade da
+planta. Trator não faz trigo crescer mais rápido. Dinheiro compra produtividade,
+não biologia.
+
+Cada tarefa custa pontos de trabalho: preparar 3, plantar 1, colher 3,
+entregar 1 — ciclo completo de campo = 8.
+
+| Nível | Capacidade/dia | Campos para não desperdiçar | Custo |
+|-------|----------------|------------------------------|-------|
+| Manual | 4 | 2 | — |
+| Ferramentas simples | 6 | 3 | 140 |
+| Ferramentas médias | 8 | 4 | 320 |
+| Ferramentas sofisticadas | 12 | 6 | 700 |
+| Mecanização | 18 | 9 | 1500 |
+
+O painel mostra em quantos dias cada upgrade se paga. É a conta de retorno sobre
+investimento num formato que a criança faz de cabeça.
+
+## Terra e ferramenta são capitais complementares
+
+Este foi o achado mais importante do desenho. Com 2 campos e lavoura de 4 dias, o
+teto biológico é 2,5 trigo/dia — e ferramentas médias já saturam esse teto.
+Investir em mecanização daria **retorno zero**, e a lição de investimento
+nasceria quebrada.
+
+A correção foi tornar a terra comprável, com a escada fechando exata: 9 campos
+suportam exatamente a capacidade da mecanização. A criança precisa equilibrar os
+dois e descobrir sozinha que trator sem terra é dinheiro parado. O painel avisa
+quando a capacidade está sobrando.
+
+Coberto por teste: `technology.test.ts` garante que cada nível exige mais campos
+e que a fazenda tem campos suficientes para o topo.
 
 ## Balanceamento
 
