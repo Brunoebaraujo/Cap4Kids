@@ -33,12 +33,12 @@ import {
   WHEAT_HARVEST_YIELD,
 } from '../systems/EconomySystem';
 import { FieldSystem } from '../systems/FieldSystem';
-import { GameClockSystem } from '../systems/GameClockSystem';
+import { GameClockSystem, REAL_SECONDS_PER_DAY, type SpeedOption } from '../systems/GameClockSystem';
 import { InflationSystem } from '../systems/InflationSystem';
 import { MarketSystem } from '../systems/MarketSystem';
 import { PedagogySystem } from '../systems/PedagogySystem';
 import { TaskSystem } from '../systems/TaskSystem';
-import type { CameraMode, FieldState, GameSnapshot, Lesson, TaskType } from '../types';
+import type { CameraMode, FieldState, GameSnapshot, Lesson, SeasonReport, TaskType } from '../types';
 
 export const MAP_COLS = 28;
 export const MAP_ROWS = 28;
@@ -54,9 +54,11 @@ const FIELD_LABELS: Record<FieldState, string> = {
   Locked: 'Bloqueado',
 };
 
-const SAVE_KEY = 'cap4kids.save.v3';
-const WORKER_SPEED = 2.6;
-const WORK_SECONDS = 2.4;
+const SAVE_KEY = 'cap4kids.save.v4';
+/** Tiles por DIA DE JOGO. Equivale a ~2,6 tiles/s no ritmo padrao. */
+const WORKER_SPEED_TILES_PER_DAY = 2.6 * REAL_SECONDS_PER_DAY;
+/** Duracao de uma tarefa em DIAS DE JOGO (~2,4s no ritmo padrao). */
+const WORK_DAYS = 2.4 / REAL_SECONDS_PER_DAY;
 
 const LANDMARKS = {
   farmhouse: { tileX: 8, tileY: 8, sprite: 'farmhouse' as SpriteKey },
@@ -91,6 +93,8 @@ export class IsoFarmScene extends Phaser.Scene {
   private readonly inflation = new InflationSystem();
   private readonly pedagogy = new PedagogySystem();
   private lessons: Lesson[] = [];
+  private seasonReports: SeasonReport[] = [];
+  private seasonAnchor = { debt: 400, priceIndex: 100, wheatPrice: 10 };
 
   private groundTiles = new Map<string, Phaser.GameObjects.Image>();
   private cropSprites = new Map<string, Phaser.GameObjects.Image>();
@@ -141,24 +145,25 @@ export class IsoFarmScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number): void {
-    const deltaSeconds = delta / 1000;
+    const tick = this.clock.update(delta / 1000);
+    if (tick.deltaDays <= 0) return;
 
-    const elapsedDays = this.clock.update(deltaSeconds);
-    for (let i = 0; i < elapsedDays; i += 1) this.closeDay();
+    for (let i = 0; i < tick.daysElapsed; i += 1) this.closeDay();
+    if (tick.seasonEnded) this.closeSeason();
 
-    if (this.fields.updateGrowth(deltaSeconds)) {
+    if (this.fields.updateGrowth(tick.deltaDays)) {
       this.redrawFields();
     }
 
-    if (this.travel) this.advanceTravel(deltaSeconds);
-    else if (this.work) this.advanceWork(deltaSeconds);
+    if (this.travel) this.advanceTravel(tick.deltaDays);
+    else if (this.work) this.advanceWork(tick.deltaDays);
 
     if (this.cameraMode === 'followMaya') {
       const world = tileToWorld(this.workerTileX, this.workerTileY);
       this.cameras.main.centerOn(world.x, world.y);
     }
 
-    if (elapsedDays > 0 || this.travel || this.work) this.emitState();
+    if (tick.daysElapsed > 0 || this.travel || this.work) this.emitState();
   }
 
   // ---------------------------------------------------------------- mundo
@@ -295,6 +300,7 @@ export class IsoFarmScene extends Phaser.Scene {
     keyboard.on('keydown-B', () => this.buySeed());
     keyboard.on('keydown-V', () => this.sellWheat());
     keyboard.on('keydown-C', () => this.setCameraMode(this.cameraMode === 'free' ? 'followMaya' : 'free'));
+    keyboard.on('keydown-SPACE', () => { this.clock.togglePause(); this.emitState(); });
   }
 
   private selectTile(tileX: number, tileY: number): void {
@@ -344,6 +350,10 @@ export class IsoFarmScene extends Phaser.Scene {
       }
       case 'setCameraMode':
         this.setCameraMode(command.mode);
+        break;
+      case 'setSpeed':
+        this.clock.setSpeed(command.speed as SpeedOption);
+        this.emitState();
         break;
     }
   }
@@ -426,12 +436,12 @@ export class IsoFarmScene extends Phaser.Scene {
     this.travel = { task, targetTileX: target.x, targetTileY: target.y };
   }
 
-  private advanceTravel(deltaSeconds: number): void {
+  private advanceTravel(deltaDays: number): void {
     if (!this.travel) return;
     const dx = this.travel.targetTileX - this.workerTileX;
     const dy = this.travel.targetTileY - this.workerTileY;
     const distance = Math.hypot(dx, dy);
-    const step = WORKER_SPEED * deltaSeconds;
+    const step = WORKER_SPEED_TILES_PER_DAY * deltaDays;
 
     if (distance <= step) {
       this.workerTileX = this.travel.targetTileX;
@@ -451,10 +461,10 @@ export class IsoFarmScene extends Phaser.Scene {
     this.worker.setDepth(depthFor(anchor.y));
   }
 
-  private advanceWork(deltaSeconds: number): void {
+  private advanceWork(deltaDays: number): void {
     if (!this.work) return;
-    this.work.elapsed += deltaSeconds;
-    if (this.work.elapsed < WORK_SECONDS) return;
+    this.work.elapsed += deltaDays;
+    if (this.work.elapsed < WORK_DAYS) return;
 
     this.applyTask(this.work.task);
     this.work = null;
@@ -537,6 +547,35 @@ export class IsoFarmScene extends Phaser.Scene {
     this.saveGame();
   }
 
+  private closeSeason(): void {
+    const eco = this.economy.economy;
+    const report: SeasonReport = {
+      seasonNumber: this.clock.seasonNumber - 1,
+      season: this.clock.season,
+      revenue: Math.round(eco.seasonRevenue),
+      expenses: Math.round(eco.seasonExpenses),
+      profit: Math.round(eco.seasonRevenue - eco.seasonExpenses),
+      debtStart: this.seasonAnchor.debt,
+      debtEnd: eco.debt,
+      interestPaid: Math.round(eco.seasonInterest),
+      priceIndexStart: Math.round(this.seasonAnchor.priceIndex),
+      priceIndexEnd: Math.round(this.inflation.index),
+      wheatPriceStart: this.seasonAnchor.wheatPrice,
+      wheatPriceEnd: this.market.priceOf('wheat'),
+    };
+    this.seasonReports.push(report);
+
+    this.seasonAnchor = {
+      debt: eco.debt,
+      priceIndex: this.inflation.index,
+      wheatPrice: this.market.priceOf('wheat'),
+    };
+    this.economy.rollOverSeason();
+    this.clock.setSpeed(0);
+    publishNotice(`Fim da estação ${report.seasonNumber}. Veja seu balanço.`, 'info');
+    this.saveGame();
+  }
+
   // ---------------------------------------------------------------- campos
 
   private groundForFieldState(state: FieldState): GroundKey {
@@ -584,7 +623,7 @@ export class IsoFarmScene extends Phaser.Scene {
       clock: this.clock.snapshot,
       taskProgress: {
         task: this.work?.task ?? this.travel?.task ?? null,
-        progress: this.work ? Math.min(1, this.work.elapsed / WORK_SECONDS) : 0,
+        progress: this.work ? Math.min(1, this.work.elapsed / WORK_DAYS) : 0,
       },
       worker: {
         tileX: Math.round(this.workerTileX),
@@ -598,6 +637,7 @@ export class IsoFarmScene extends Phaser.Scene {
       market: this.market.snapshot(),
       inflation: this.inflation.snapshot,
       lessons: [...this.lessons],
+      seasonReports: [...this.seasonReports],
     };
     publishState(snapshot);
   }
@@ -615,6 +655,8 @@ export class IsoFarmScene extends Phaser.Scene {
       this.market.load(save.market);
       this.pedagogy.load(save.pedagogy);
       this.lessons = Array.isArray(save.lessons) ? save.lessons : [];
+      this.seasonReports = Array.isArray(save.seasonReports) ? save.seasonReports : [];
+      if (save.seasonAnchor) this.seasonAnchor = save.seasonAnchor;
       this.market.setPriceIndex(this.inflation.index);
       this.workerTileX = save.workerTileX ?? this.workerTileX;
       this.workerTileY = save.workerTileY ?? this.workerTileY;
@@ -631,11 +673,13 @@ export class IsoFarmScene extends Phaser.Scene {
           economy: this.economy.serialize(),
           fields: this.fields.serialize(),
           tasks: this.tasks.serialize(),
-          clock: this.clock.snapshot,
+          clock: { ...this.clock.snapshot, dayFraction: this.clock.dayFraction },
           inflation: this.inflation.serialize(),
           market: this.market.serialize(),
           pedagogy: this.pedagogy.serialize(),
           lessons: this.lessons,
+          seasonReports: this.seasonReports,
+          seasonAnchor: this.seasonAnchor,
           workerTileX: this.workerTileX,
           workerTileY: this.workerTileY,
         }),

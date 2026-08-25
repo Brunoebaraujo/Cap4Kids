@@ -56,6 +56,19 @@ e testável sem browser.
   Usar `tx + ty` quebra quando há footprints diferentes na mesma cena.
 - Chão: depth fixo `-100000`. Os losangos casam exatamente, sem sobreposição.
 
+## Tempo
+
+`GameClockSystem` é a autoridade única. Ele converte segundos reais em **dias de
+jogo** e devolve `{ deltaDays, daysElapsed, seasonEnded }`. Todo o resto da
+simulação consome dias, nunca segundos:
+
+- `FieldSystem.updateGrowth(deltaDays)` — `GROWTH_STAGE_DAYS = 0.1`
+- Economia, mercado e inflação avançam por `daysElapsed` inteiros
+- Deslocamento e trabalho da trabalhadora em tiles/dia e dias
+
+Consequência: `REAL_SECONDS_PER_DAY` e `speed` são botões de ritmo que não
+alteram nenhuma proporção do jogo. Coberto por `clock.test.ts`.
+
 ## Barramento de comandos
 
 O HUD nunca chama métodos da cena e nunca sintetiza eventos de teclado. Ele emite

@@ -275,3 +275,45 @@ html, body, #root {
 .journal-panel li { border-left: 3px solid var(--gold); padding-left: 10px; }
 .journal-panel li strong { display: block; font-size: 13px; margin-bottom: 2px; }
 .journal-panel li span { font-size: 12px; line-height: 1.45; color: var(--ink-soft); }
+
+/* ---------------------------------------------------------- tempo e estação */
+
+.resource-season {
+  font-size: 12px; font-weight: 600; color: #2f6b3f;
+  background: #dfeacb; border: 1px solid #a8b88a;
+  padding: 2px 8px; border-radius: 2px;
+}
+
+.speed-group { display: inline-flex; gap: 2px; }
+.speed-button {
+  min-width: 26px; height: 22px;
+  background: var(--button); border: 1.5px solid var(--frame);
+  box-shadow: inset 0 1px 0 #e0d2ae, inset 0 -1px 0 #7a6644;
+  color: var(--ink); font-family: inherit; font-size: 11px; font-weight: 700;
+  cursor: pointer; padding: 0 4px;
+}
+.speed-button:hover { background: var(--button-hover); }
+.speed-active {
+  background: var(--gold);
+  box-shadow: inset 0 1px 0 #f0d089, inset 0 -1px 0 #8a6a16;
+}
+
+.season-card {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(500px, 86vw);
+  background: var(--panel); border: 3px solid var(--frame);
+  box-shadow: inset 0 3px 0 var(--panel-light), 0 8px 28px rgba(0, 0, 0, 0.45);
+  padding: 16px 20px;
+}
+.season-card h3 { margin: 0 0 12px; font-size: 18px; }
+.season-grid {
+  margin: 0 0 12px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px 18px;
+}
+.season-grid > div { display: flex; justify-content: space-between; font-size: 13px; }
+.season-grid dt { color: var(--ink-soft); }
+.season-grid dd { margin: 0; font-weight: 700; }
+.season-grid .good { color: var(--good); }
+.season-grid .bad { color: var(--bad); }
+.season-note { margin: 0 0 14px; font-size: 13px; line-height: 1.5; }

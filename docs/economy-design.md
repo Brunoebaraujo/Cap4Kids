@@ -64,6 +64,37 @@ criança vê no painel.
 painel de Indicadores. Vender não basta: se o custo de produzir supera a receita,
 a fazenda perde dinheiro.
 
+## Tempo e ritmo
+
+**Toda a simulação é expressa em dias de jogo.** `GameClockSystem` é o único
+lugar que sabe quantos segundos reais dura um dia (`REAL_SECONDS_PER_DAY = 60`).
+
+Antes do refactor, o crescimento da lavoura (72s) e a duração do dia (180s) eram
+constantes independentes em segundos reais. Encurtar o dia para melhorar o ritmo
+fazia os custos diários baterem 3× mais vezes por colheita e destruía o
+balanceamento. Agora a duração do dia é um botão de ritmo puro: `clock.test.ts`
+prova que a lavoura leva o mesmo número de **dias** em qualquer velocidade.
+
+Controle de velocidade: pausa, 1×, 2×, 3× (barra de espaço pausa). Multiplicar o
+tempo não altera nenhuma proporção, então acelerar nunca muda o resultado
+econômico de uma estratégia — só quanto o jogador vê por sessão.
+
+| Sessão | Dias | Inflação sentida | Estações |
+|--------|------|------------------|----------|
+| 20 min a 1× | 20 | 15% | 2 |
+| 20 min a 2× | 40 | 32% | 4 |
+| 20 min a 3× | 60 | 52% | 6 |
+
+Antes, 20 minutos rendiam ~7 dias e 5% de inflação — imperceptível. O conceito
+mais difícil de ensinar simplesmente não chegava ao jogador.
+
+## Estações como capítulos
+
+Dez dias formam uma estação. Ao fechar, o jogo **pausa sozinho** e mostra o
+balanço: receita, despesas, lucro, juros pagos, variação da dívida e quanto os
+preços subiram. É o momento pedagógico mais forte do jogo, porque conecta as
+decisões da estação inteira a um número só.
+
 ## Balanceamento
 
 A partida **precisa ser vencível**. Uma primeira calibragem tinha a dívida

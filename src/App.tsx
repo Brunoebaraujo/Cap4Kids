@@ -3,7 +3,7 @@ import mayaPortrait from './assets/characters/maya/portraits/maya-portrait.webp'
 import { onNotice, onState, sendCommand, type Notice } from './game/commandBus';
 import { createGame } from './game/createGame';
 import { MAP_COLS, MAP_ROWS } from './game/scenes/IsoFarmScene';
-import type { FieldState, GameSnapshot, Lesson, MarketGoodSnapshot, TaskType } from './game/types';
+import type { FieldState, GameSnapshot, Lesson, MarketGoodSnapshot, SeasonReport, TaskType } from './game/types';
 
 const taskLabels: Record<TaskType, string> = {
   'Prepare Soil': 'Preparar solo',
@@ -34,14 +34,17 @@ const initialSnapshot: GameSnapshot = {
   economy: {
     coins: 40, debt: 250, dailyHouseholdCost: 8, profitLoss: 0,
     todayRevenue: 0, todayExpenses: 0, lastDayRevenue: 0, lastDayExpenses: 0,
-    interestPaidTotal: 0,
+    interestPaidTotal: 0, seasonRevenue: 0, seasonExpenses: 0, seasonInterest: 0,
   },
   inventory: { seeds: 0, wheat: 0, milk: 0 },
   currentTask: null,
   taskQueue: [],
   fields: [],
   cameraMode: 'free',
-  clock: { day: 1, minuteOfDay: 360, dailyCostCountdownSeconds: 180, isRunning: true },
+  clock: {
+    day: 1, dayFraction: 0, minuteOfDay: 360, speed: 1,
+    season: 'Primavera', seasonNumber: 1, dayOfSeason: 1, daysPerSeason: 10,
+  },
   taskProgress: { task: null, progress: 0 },
   worker: { tileX: 10, tileY: 11, activity: 'idle' },
   selectedTile: null,
@@ -51,6 +54,7 @@ const initialSnapshot: GameSnapshot = {
   market: [],
   inflation: { index: 100, dailyRatePercent: 1.2, accumulatedPercent: 0 },
   lessons: [],
+  seasonReports: [],
 };
 
 function formatTime(minuteOfDay: number) {
@@ -73,6 +77,40 @@ function Sparkline({ good }: { good: MarketGoodSnapshot }) {
     <svg viewBox="0 0 60 16" className="spark" aria-hidden="true">
       <polyline points={path} fill="none" stroke="#4a7c3f" strokeWidth="1.4" />
     </svg>
+  );
+}
+
+function SeasonReportCard({ report, onClose }: { report: SeasonReport; onClose: () => void }) {
+  const inflacao = Math.round(
+    ((report.priceIndexEnd - report.priceIndexStart) / report.priceIndexStart) * 100,
+  );
+  const dividaVariou = report.debtEnd - report.debtStart;
+  return (
+    <div className="season-card" role="dialog" aria-labelledby="season-title">
+      <span className="lesson-concept">Balanço da estação</span>
+      <h3 id="season-title">{report.season} — estação {report.seasonNumber}</h3>
+      <dl className="season-grid">
+        <div><dt>Receita</dt><dd className="good">+{report.revenue}</dd></div>
+        <div><dt>Despesas</dt><dd className="bad">-{report.expenses}</dd></div>
+        <div><dt>Lucro</dt><dd className={report.profit >= 0 ? 'good' : 'bad'}>
+          {report.profit >= 0 ? '+' : ''}{report.profit}</dd></div>
+        <div><dt>Juros pagos</dt><dd className="bad">{report.interestPaid}</dd></div>
+        <div><dt>Dívida</dt><dd className={dividaVariou <= 0 ? 'good' : 'bad'}>
+          {report.debtStart} → {report.debtEnd}</dd></div>
+        <div><dt>Preços subiram</dt><dd className="bad">{inflacao}%</dd></div>
+      </dl>
+      <p className="season-note">
+        {report.profit >= 0
+          ? `Você fechou a estação no lucro. Mas repare: os preços subiram ${inflacao}%, então cada moeda compra menos que no começo.`
+          : 'Você gastou mais do que ganhou nesta estação. Vale olhar o que está pesando: semente, despesa da casa ou juros da dívida.'}
+        {dividaVariou > 0
+          ? ` A dívida cresceu ${dividaVariou} sozinha — são os juros.`
+          : dividaVariou < 0
+            ? ` Você abateu ${-dividaVariou} da dívida. Isso reduz os juros das próximas estações.`
+            : ''}
+      </p>
+      <button type="button" className="ghost-button" onClick={onClose}>Começar a próxima estação</button>
+    </div>
   );
 }
 
@@ -104,6 +142,7 @@ export default function App() {
   const [notice, setNotice] = useState<Notice>({ text: 'Bem-vindo ao Cap4Kids.', tone: 'info' });
   const [dismissed, setDismissed] = useState<string[]>([]);
   const [journalOpen, setJournalOpen] = useState(false);
+  const [seenReports, setSeenReports] = useState(0);
 
   useEffect(() => {
     if (!rootRef.current || gameRef.current) return;
@@ -129,6 +168,9 @@ export default function App() {
     () => [...snapshot.lessons].reverse().find((l) => !dismissed.includes(l.id)),
     [snapshot.lessons, dismissed],
   );
+  const pendingReport = snapshot.seasonReports.length > seenReports
+    ? snapshot.seasonReports[snapshot.seasonReports.length - 1]
+    : null;
   const { lastDayRevenue, lastDayExpenses } = snapshot.economy;
   const dailyProfit = lastDayRevenue - lastDayExpenses;
 
@@ -144,6 +186,22 @@ export default function App() {
         <span className="resource-divider" />
         <span className="resource-label">Dia {snapshot.clock.day}</span>
         <span className="resource-label">{formatTime(snapshot.clock.minuteOfDay)}</span>
+        <span className="resource-season">
+          {snapshot.clock.season} · {snapshot.clock.dayOfSeason}/{snapshot.clock.daysPerSeason}
+        </span>
+        <span className="speed-group" role="group" aria-label="Velocidade do tempo">
+          {[0, 1, 2, 3].map((sp) => (
+            <button
+              key={sp}
+              type="button"
+              className={`speed-button${snapshot.clock.speed === sp ? ' speed-active' : ''}`}
+              title={sp === 0 ? 'Pausar (espaço)' : `Velocidade ${sp}x`}
+              onClick={() => sendCommand({ type: 'setSpeed', speed: sp })}
+            >
+              {sp === 0 ? '❚❚' : `${sp}×`}
+            </button>
+          ))}
+        </span>
         <span className="resource-divider" />
         <span className="resource-label" title="Inflação acumulada desde o dia 1">
           Preços {snapshot.inflation.accumulatedPercent >= 0 ? '+' : ''}
@@ -192,7 +250,17 @@ export default function App() {
         </button>
       </aside>
 
-      {activeLesson && (
+      {pendingReport && (
+        <SeasonReportCard
+          report={pendingReport}
+          onClose={() => {
+            setSeenReports(snapshot.seasonReports.length);
+            sendCommand({ type: 'setSpeed', speed: 1 });
+          }}
+        />
+      )}
+
+      {!pendingReport && activeLesson && (
         <div className="lesson-card" role="dialog" aria-labelledby="lesson-title">
           <span className="lesson-concept">{activeLesson.concept}</span>
           <h3 id="lesson-title">{activeLesson.title}</h3>

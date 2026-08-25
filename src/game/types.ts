@@ -34,6 +34,9 @@ export interface Economy {
   lastDayRevenue: number;
   lastDayExpenses: number;
   interestPaidTotal: number;
+  seasonRevenue: number;
+  seasonExpenses: number;
+  seasonInterest: number;
 }
 
 export type GoodId = 'wheat' | 'milk';
@@ -74,14 +77,35 @@ export interface SaleSummary {
 export interface FieldSnapshot {
   id: number;
   state: FieldState;
-  growthElapsedSeconds: number;
+  growthElapsedDays: number;
 }
+
+export type Season = 'Primavera' | 'Verão' | 'Outono' | 'Inverno';
 
 export interface GameClockSnapshot {
   day: number;
+  dayFraction: number;
   minuteOfDay: number;
-  dailyCostCountdownSeconds: number;
-  isRunning: boolean;
+  speed: number;
+  season: Season;
+  seasonNumber: number;
+  dayOfSeason: number;
+  daysPerSeason: number;
+}
+
+export interface SeasonReport {
+  seasonNumber: number;
+  season: Season;
+  revenue: number;
+  expenses: number;
+  profit: number;
+  debtStart: number;
+  debtEnd: number;
+  interestPaid: number;
+  priceIndexStart: number;
+  priceIndexEnd: number;
+  wheatPriceStart: number;
+  wheatPriceEnd: number;
 }
 
 export interface TaskProgressSnapshot {
@@ -112,4 +136,5 @@ export interface GameSnapshot {
   market: MarketGoodSnapshot[];
   inflation: InflationSnapshot;
   lessons: Lesson[];
+  seasonReports: SeasonReport[];
 }

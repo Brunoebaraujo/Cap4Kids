@@ -1,25 +1,26 @@
 import type { FieldSnapshot, FieldState } from '../types';
 
-export const GROWTH_STAGE_SECONDS = 18;
+/** Um estagio de crescimento em DIAS DE JOGO. 4 estagios = 0,4 dia por ciclo. */
+export const GROWTH_STAGE_DAYS = 0.1;
 
 export interface FieldRecord {
   id: number;
   tileX: number;
   tileY: number;
   state: FieldState;
-  growthElapsedSeconds: number;
+  growthElapsedDays: number;
 }
 
-export type FieldSaveState = Array<Pick<FieldRecord, 'id' | 'state' | 'growthElapsedSeconds'>>;
+export type FieldSaveState = Array<Pick<FieldRecord, 'id' | 'state' | 'growthElapsedDays'>>;
 
 export class FieldSystem {
   private readonly fields: FieldRecord[] = [
-    { id: 1, tileX: 15, tileY: 16, state: 'Empty', growthElapsedSeconds: 0 },
-    { id: 2, tileX: 21, tileY: 20, state: 'Locked', growthElapsedSeconds: 0 },
+    { id: 1, tileX: 15, tileY: 16, state: 'Empty', growthElapsedDays: 0 },
+    { id: 2, tileX: 21, tileY: 20, state: 'Locked', growthElapsedDays: 0 },
   ];
 
   get snapshots(): FieldSnapshot[] {
-    return this.fields.map(({ id, state, growthElapsedSeconds }) => ({ id, state, growthElapsedSeconds }));
+    return this.fields.map(({ id, state, growthElapsedDays }) => ({ id, state, growthElapsedDays }));
   }
 
   get allFields(): FieldRecord[] {
@@ -44,7 +45,7 @@ export class FieldSystem {
     if (!field || field.state !== 'Empty') return false;
 
     field.state = 'Prepared';
-    field.growthElapsedSeconds = 0;
+    field.growthElapsedDays = 0;
     return true;
   }
 
@@ -54,7 +55,7 @@ export class FieldSystem {
     if (!field || field.state !== 'Prepared') return false;
 
     field.state = 'Planted';
-    field.growthElapsedSeconds = 0;
+    field.growthElapsedDays = 0;
     return true;
   }
 
@@ -64,18 +65,18 @@ export class FieldSystem {
     if (!field || field.state !== 'Ready To Harvest') return false;
 
     field.state = 'Empty';
-    field.growthElapsedSeconds = 0;
+    field.growthElapsedDays = 0;
     return true;
   }
 
-  updateGrowth(deltaSeconds: number) {
+  updateGrowth(deltaDays: number) {
     let changed = false;
 
     this.fields.forEach((field) => {
       if (!this.isGrowing(field.state)) return;
 
-      field.growthElapsedSeconds += deltaSeconds;
-      const nextState = this.stateForGrowth(field.growthElapsedSeconds);
+      field.growthElapsedDays += deltaDays;
+      const nextState = this.stateForGrowth(field.growthElapsedDays);
       if (nextState !== field.state) {
         field.state = nextState;
         changed = true;
@@ -92,23 +93,23 @@ export class FieldSystem {
       const field = this.fields.find((candidate) => candidate.id === saved.id);
       if (!field) return;
       field.state = saved.state;
-      field.growthElapsedSeconds = saved.growthElapsedSeconds ?? 0;
+      field.growthElapsedDays = saved.growthElapsedDays ?? 0;
     });
   }
 
   serialize(): FieldSaveState {
-    return this.fields.map(({ id, state, growthElapsedSeconds }) => ({ id, state, growthElapsedSeconds }));
+    return this.fields.map(({ id, state, growthElapsedDays }) => ({ id, state, growthElapsedDays }));
   }
 
   private isGrowing(state: FieldState) {
     return ['Planted', 'Growing Stage 1', 'Growing Stage 2', 'Growing Stage 3'].includes(state);
   }
 
-  private stateForGrowth(seconds: number): FieldState {
-    if (seconds >= GROWTH_STAGE_SECONDS * 4) return 'Ready To Harvest';
-    if (seconds >= GROWTH_STAGE_SECONDS * 3) return 'Growing Stage 3';
-    if (seconds >= GROWTH_STAGE_SECONDS * 2) return 'Growing Stage 2';
-    if (seconds >= GROWTH_STAGE_SECONDS) return 'Growing Stage 1';
+  private stateForGrowth(days: number): FieldState {
+    if (days >= GROWTH_STAGE_DAYS * 4) return 'Ready To Harvest';
+    if (days >= GROWTH_STAGE_DAYS * 3) return 'Growing Stage 3';
+    if (days >= GROWTH_STAGE_DAYS * 2) return 'Growing Stage 2';
+    if (days >= GROWTH_STAGE_DAYS) return 'Growing Stage 1';
     return 'Planted';
   }
 }

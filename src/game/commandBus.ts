@@ -14,6 +14,7 @@ export type Command =
   | { type: 'buySeed' }
   | { type: 'sellWheat' }
   | { type: 'repayDebt'; amount: number }
+  | { type: 'setSpeed'; speed: number }
   | { type: 'cancelQueue' }
   | { type: 'selectTile'; tileX: number; tileY: number }
   | { type: 'centerOnWorker' }

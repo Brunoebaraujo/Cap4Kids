@@ -26,6 +26,9 @@ export class EconomySystem {
     lastDayRevenue: 0,
     lastDayExpenses: 0,
     interestPaidTotal: 0,
+    seasonRevenue: 0,
+    seasonExpenses: 0,
+    seasonInterest: 0,
   };
 
   readonly inventory: Inventory = { seeds: 0, wheat: 0, milk: 0 };
@@ -36,12 +39,14 @@ export class EconomySystem {
     this.economy.coins -= amount;
     this.economy.profitLoss -= amount;
     this.economy.todayExpenses += amount;
+    this.economy.seasonExpenses += amount;
   }
 
   private earn(amount: number): void {
     this.economy.coins += amount;
     this.economy.profitLoss += amount;
     this.economy.todayRevenue += amount;
+    this.economy.seasonRevenue += amount;
   }
 
   /** Compra uma semente pelo preco corrente (ja corrigido pela inflacao). */
@@ -85,6 +90,7 @@ export class EconomySystem {
     this.economy.coins -= payable;
     this.economy.debt -= payable;
     this.economy.todayExpenses += payable;
+    this.economy.seasonExpenses += payable;
     return payable;
   }
 
@@ -95,8 +101,10 @@ export class EconomySystem {
     if (interest <= 0) return 0;
     this.economy.debt += interest;
     this.economy.interestPaidTotal += interest;
+    this.economy.seasonInterest += interest;
     this.economy.profitLoss -= interest;
     this.economy.todayExpenses += interest;
+    this.economy.seasonExpenses += interest;
     return interest;
   }
 
@@ -105,6 +113,7 @@ export class EconomySystem {
     this.economy.dailyHouseholdCost = cost;
     this.economy.profitLoss -= cost;
     this.economy.todayExpenses += cost;
+    this.economy.seasonExpenses += cost;
 
     if (this.economy.coins >= cost) {
       this.economy.coins -= cost;
@@ -115,6 +124,13 @@ export class EconomySystem {
     this.economy.coins = 0;
     this.economy.debt += addedDebt;
     return { paid, addedDebt };
+  }
+
+  /** Fecha a estacao contabil e zera os acumuladores dela. */
+  rollOverSeason() {
+    this.economy.seasonRevenue = 0;
+    this.economy.seasonExpenses = 0;
+    this.economy.seasonInterest = 0;
   }
 
   /** Fecha o dia contabil e zera os acumuladores. */

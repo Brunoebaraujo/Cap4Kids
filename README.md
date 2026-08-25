@@ -31,7 +31,8 @@ npm run gen:assets  # regenera os placeholders isométricos
 - **Botão direito ou do meio, arrastando** — move a câmera
 - **Roda do mouse** — zoom
 - **1** Preparar solo · **2** Plantar trigo · **3** Colher trigo · **4** Entregar no silo
-- **B** Comprar semente · **C** Alterna câmera livre / seguir
+- **B** Comprar semente · **V** Vender trigo · **C** Alterna câmera
+- **Espaço** Pausa / retoma
 
 ## Estado atual
 
@@ -47,6 +48,13 @@ Ondas 1 e 2 concluídas.
 - Diário de aprendizado
 - 38 testes, incluindo 5 partidas simuladas de balanceamento
 
+**Onda 3a — ritmo**
+
+- Toda a simulação em dias de jogo, com uma única autoridade de tempo
+- Controle de velocidade (pausa, 1×, 2×, 3×) sem afetar balanceamento
+- Estações de 10 dias como capítulos, com balanço ao fechar
+- 46 testes
+
 **Onda 1 — fundação isométrica**
 
 - Renderer isométrico dimetrico 2:1, com projeção própria coberta por testes
@@ -58,7 +66,7 @@ Ondas 1 e 2 concluídas.
 
 ## Próximas ondas
 
-3. Sistema de gado e segunda cultura (habilita custo de oportunidade)
+3. Segunda cultura (habilita custo de oportunidade) e sistema de gado
 4. Investimento em equipamento (CAPEX) e risco (clima, praga)
 5. Troca dos placeholders pelo pack comprado (ver `docs/art-direction.md`)
 
