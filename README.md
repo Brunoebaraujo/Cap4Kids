@@ -35,7 +35,19 @@ npm run gen:assets  # regenera os placeholders isométricos
 
 ## Estado atual
 
-Onda 1 concluída:
+Ondas 1 e 2 concluídas.
+
+**Onda 2 — economia que ensina**
+
+- Mercado com preço endógeno e precificação marginal (`MarketSystem`)
+- Inflação composta afetando preços e custos (`InflationSystem`)
+- Juros compostos sobre a dívida, com ação de abatimento
+- Camada pedagógica: lições disparadas por evento, nunca por tempo (`PedagogySystem`)
+- Painéis de Indicadores e Mercado com tendência e minigráfico
+- Diário de aprendizado
+- 38 testes, incluindo 5 partidas simuladas de balanceamento
+
+**Onda 1 — fundação isométrica**
 
 - Renderer isométrico dimetrico 2:1, com projeção própria coberta por testes
 - Picking por mouse, hover e seleção de tile
@@ -46,12 +58,12 @@ Onda 1 concluída:
 
 ## Próximas ondas
 
-2. Mercado com preço endógeno, inflação e juros sobre a dívida
-3. Sistema de gado
-4. Camada pedagógica (explicar *por que* o preço mudou)
+3. Sistema de gado e segunda cultura (habilita custo de oportunidade)
+4. Investimento em equipamento (CAPEX) e risco (clima, praga)
 5. Troca dos placeholders pelo pack comprado (ver `docs/art-direction.md`)
 
 ## Documentação
 
 - `docs/technical-architecture.md`
+- `docs/economy-design.md`
 - `docs/art-direction.md`

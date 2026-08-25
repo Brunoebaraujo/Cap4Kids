@@ -184,3 +184,94 @@ html, body, #root {
 }
 .minimap-canvas { width: 100%; height: 100%; display: block; }
 .minimap-actions { display: flex; gap: 4px; }
+
+/* ---------------------------------------------------------- painéis laterais */
+
+.side-stack {
+  position: absolute;
+  top: 92px; right: 12px;
+  width: 236px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+
+.side-panel {
+  background: var(--panel);
+  border: 2px solid var(--frame);
+  border-radius: 3px;
+  box-shadow: inset 0 2px 0 var(--panel-light), inset 0 -2px 0 var(--panel-dark);
+  padding: 8px 10px;
+}
+.side-panel h2 {
+  margin: 0 0 6px;
+  font-size: 12px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--ink);
+}
+
+.indicator-list { margin: 0 0 8px; display: flex; flex-direction: column; gap: 3px; }
+.indicator-list > div { display: flex; justify-content: space-between; font-size: 12px; }
+.indicator-list dt { color: var(--ink-soft); }
+.indicator-list dd { margin: 0; font-weight: 600; }
+.indicator-list .good { color: var(--good); }
+.indicator-list .bad { color: var(--bad); }
+
+.market-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.market-table th {
+  text-align: left; font-size: 10px; font-weight: 600;
+  color: var(--ink-soft); text-transform: uppercase;
+  border-bottom: 1px solid var(--panel-dark); padding-bottom: 2px;
+}
+.market-table td { padding: 3px 0; }
+.market-price { font-weight: 700; }
+.trend { font-size: 10px; }
+.trend-up { color: var(--good); }
+.trend-down { color: var(--bad); }
+.trend-flat { color: var(--ink-soft); }
+.spark { width: 60px; height: 16px; display: block; }
+.spark-empty { color: var(--ink-soft); font-size: 11px; }
+.panel-hint { margin: 6px 0 0; font-size: 11px; color: var(--ink-soft); line-height: 1.3; }
+
+.journal-button {
+  background: var(--button); border: 2px solid var(--frame);
+  box-shadow: inset 0 2px 0 var(--panel-light), inset 0 -2px 0 var(--panel-dark);
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  color: var(--ink); padding: 6px; cursor: pointer;
+}
+.journal-button:hover { background: var(--button-hover); }
+
+/* ---------------------------------------------------------- lição */
+
+.lesson-card {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(460px, 84vw);
+  background: var(--panel);
+  border: 3px solid var(--frame);
+  box-shadow: inset 0 3px 0 var(--panel-light), 0 8px 28px rgba(0, 0, 0, 0.42);
+  padding: 16px 20px;
+}
+.lesson-concept {
+  display: inline-block;
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+  color: #7a5a18; background: #e6d6a8;
+  border: 1px solid #a89060; padding: 2px 8px; margin-bottom: 8px;
+}
+.lesson-card h3 { margin: 0 0 8px; font-size: 17px; }
+.lesson-card p { margin: 0 0 14px; font-size: 14px; line-height: 1.5; color: var(--ink); }
+
+.journal-panel {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(560px, 88vw); max-height: 66vh; overflow-y: auto;
+  background: var(--panel);
+  border: 3px solid var(--frame);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.42);
+  padding: 16px 20px;
+}
+.journal-panel h3 { margin: 0 0 12px; font-size: 16px; }
+.journal-panel ul { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.journal-panel li { border-left: 3px solid var(--gold); padding-left: 10px; }
+.journal-panel li strong { display: block; font-size: 13px; margin-bottom: 2px; }
+.journal-panel li span { font-size: 12px; line-height: 1.45; color: var(--ink-soft); }

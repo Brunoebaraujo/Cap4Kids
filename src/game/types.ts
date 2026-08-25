@@ -29,6 +29,40 @@ export interface Economy {
   debt: number;
   dailyHouseholdCost: number;
   profitLoss: number;
+  todayRevenue: number;
+  todayExpenses: number;
+  lastDayRevenue: number;
+  lastDayExpenses: number;
+  interestPaidTotal: number;
+}
+
+export type GoodId = 'wheat' | 'milk';
+
+export interface PricePoint {
+  day: number;
+  price: number;
+}
+
+export interface MarketGoodSnapshot {
+  id: GoodId;
+  label: string;
+  price: number;
+  trend: number;
+  saturation: number;
+  history: PricePoint[];
+}
+
+export interface InflationSnapshot {
+  index: number;
+  dailyRatePercent: number;
+  accumulatedPercent: number;
+}
+
+export interface Lesson {
+  id: string;
+  concept: string;
+  title: string;
+  body: string;
 }
 
 export interface SaleSummary {
@@ -75,4 +109,7 @@ export interface GameSnapshot {
   lastSale: SaleSummary | null;
   wheatSeedCost: number;
   wheatPrice: number;
+  market: MarketGoodSnapshot[];
+  inflation: InflationSnapshot;
+  lessons: Lesson[];
 }

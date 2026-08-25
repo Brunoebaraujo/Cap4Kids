@@ -13,6 +13,7 @@ export type Command =
   | { type: 'queueTask'; task: TaskType }
   | { type: 'buySeed' }
   | { type: 'sellWheat' }
+  | { type: 'repayDebt'; amount: number }
   | { type: 'cancelQueue' }
   | { type: 'selectTile'; tileX: number; tileY: number }
   | { type: 'centerOnWorker' }

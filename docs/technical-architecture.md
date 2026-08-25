@@ -96,6 +96,5 @@ npm run build    # tsc + vite build
 
 - Bundle único de ~1,65 MB (Phaser inteiro). Resolver com `manualChunks`.
 - Sem pathfinding: a trabalhadora anda em linha reta até o alvo.
-- Economia ainda é aritmética: preço fixo, dívida sem juros, sem inflação.
-  É o escopo da onda seguinte.
-- Sem camada pedagógica.
+- Uma cultura só (trigo). Custo de oportunidade exige a segunda.
+- Gado desenhado no mundo mas sem simulação.

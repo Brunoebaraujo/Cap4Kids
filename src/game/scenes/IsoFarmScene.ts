@@ -26,16 +26,35 @@ import {
   worldBounds,
   worldToTileFloor,
 } from '../iso/projection';
-import { EconomySystem, WHEAT_HARVEST_YIELD, WHEAT_PRICE, WHEAT_SEED_COST } from '../systems/EconomySystem';
+import {
+  EconomySystem,
+  HOUSEHOLD_BASE_COST,
+  SEED_BASE_COST,
+  WHEAT_HARVEST_YIELD,
+} from '../systems/EconomySystem';
 import { FieldSystem } from '../systems/FieldSystem';
 import { GameClockSystem } from '../systems/GameClockSystem';
+import { InflationSystem } from '../systems/InflationSystem';
+import { MarketSystem } from '../systems/MarketSystem';
+import { PedagogySystem } from '../systems/PedagogySystem';
 import { TaskSystem } from '../systems/TaskSystem';
-import type { CameraMode, FieldState, GameSnapshot, TaskType } from '../types';
+import type { CameraMode, FieldState, GameSnapshot, Lesson, TaskType } from '../types';
 
-export const MAP_COLS = 40;
-export const MAP_ROWS = 40;
+export const MAP_COLS = 28;
+export const MAP_ROWS = 28;
 
-const SAVE_KEY = 'cap4kids.save.v2';
+const FIELD_LABELS: Record<FieldState, string> = {
+  Empty: 'Vazio',
+  Prepared: 'Preparado',
+  Planted: 'Plantado',
+  'Growing Stage 1': 'Brotando',
+  'Growing Stage 2': 'Crescendo',
+  'Growing Stage 3': 'Quase pronto',
+  'Ready To Harvest': 'Pronto para colher',
+  Locked: 'Bloqueado',
+};
+
+const SAVE_KEY = 'cap4kids.save.v3';
 const WORKER_SPEED = 2.6;
 const WORK_SECONDS = 2.4;
 
@@ -68,6 +87,10 @@ export class IsoFarmScene extends Phaser.Scene {
   private readonly tasks = new TaskSystem();
   private readonly economy = new EconomySystem();
   private readonly clock = new GameClockSystem();
+  private readonly market = new MarketSystem();
+  private readonly inflation = new InflationSystem();
+  private readonly pedagogy = new PedagogySystem();
+  private lessons: Lesson[] = [];
 
   private groundTiles = new Map<string, Phaser.GameObjects.Image>();
   private cropSprites = new Map<string, Phaser.GameObjects.Image>();
@@ -121,12 +144,7 @@ export class IsoFarmScene extends Phaser.Scene {
     const deltaSeconds = delta / 1000;
 
     const elapsedDays = this.clock.update(deltaSeconds);
-    for (let i = 0; i < elapsedDays; i += 1) {
-      const result = this.economy.payDailyCost();
-      if (result.addedDebt > 0) {
-        publishNotice(`Faltou dinheiro. A dívida subiu ${result.addedDebt}.`, 'bad');
-      }
-    }
+    for (let i = 0; i < elapsedDays; i += 1) this.closeDay();
 
     if (this.fields.updateGrowth(deltaSeconds)) {
       this.redrawFields();
@@ -183,23 +201,19 @@ export class IsoFarmScene extends Phaser.Scene {
 
   private buildProps(): void {
     const treeSpots: Array<[number, number]> = [
-      [4, 5], [5, 22], [24, 6], [27, 17], [18, 30], [6, 31], [31, 26], [22, 3],
+      [4, 5], [5, 20], [22, 5], [24, 15], [16, 24], [6, 25], [25, 23], [20, 3], [3, 12],
     ];
     treeSpots.forEach(([x, y]) => this.placeSprite('tree', x, y));
 
-    for (let x = 16; x <= 22; x += 1) {
-      this.placeSprite('fence_ne', x, 26);
-    }
-    for (let y = 26; y <= 30; y += 1) {
-      this.placeSprite('fence_nw', 22, y);
-    }
-    this.placeSprite('cow', 18, 28);
-    this.placeSprite('cow', 20, 29);
+    for (let x = 5; x <= 10; x += 1) this.placeSprite('fence_ne', x, 20);
+    for (let y = 20; y <= 24; y += 1) this.placeSprite('fence_nw', 10, y);
+    this.placeSprite('cow', 7, 22);
+    this.placeSprite('cow', 8, 23);
   }
 
   private buildMarkers(): void {
-    this.hoverMarker = this.add.graphics().setDepth(99000);
-    this.selectionMarker = this.add.graphics().setDepth(99001);
+    this.hoverMarker = this.add.graphics().setDepth(-99998);
+    this.selectionMarker = this.add.graphics().setDepth(-99999);
   }
 
   private buildWorker(): void {
@@ -279,6 +293,7 @@ export class IsoFarmScene extends Phaser.Scene {
     keyboard.on('keydown-THREE', () => this.queueTask('Harvest Wheat'));
     keyboard.on('keydown-FOUR', () => this.queueTask('Deliver To Shipping Bin'));
     keyboard.on('keydown-B', () => this.buySeed());
+    keyboard.on('keydown-V', () => this.sellWheat());
     keyboard.on('keydown-C', () => this.setCameraMode(this.cameraMode === 'free' ? 'followMaya' : 'free'));
   }
 
@@ -287,7 +302,7 @@ export class IsoFarmScene extends Phaser.Scene {
     this.drawDiamond(this.selectionMarker, tileX, tileY, 0xffd166);
     const field = this.fields.getFieldAt(tileX, tileY);
     if (field) {
-      publishNotice(`Campo ${field.id}: ${field.state}`, 'info');
+      publishNotice(`Campo ${field.id}: ${FIELD_LABELS[field.state]}`, 'info');
     }
     this.emitState();
   }
@@ -311,6 +326,9 @@ export class IsoFarmScene extends Phaser.Scene {
       case 'sellWheat':
         this.sellWheat();
         break;
+      case 'repayDebt':
+        this.repayDebt(command.amount);
+        break;
       case 'cancelQueue':
         this.tasks.queue.splice(0, this.tasks.queue.length);
         publishNotice('Fila limpa.', 'info');
@@ -331,22 +349,48 @@ export class IsoFarmScene extends Phaser.Scene {
   }
 
   private buySeed(): void {
-    if (this.economy.buySeed()) {
-      publishNotice(`Semente comprada por ${WHEAT_SEED_COST}.`, 'good');
+    const cost = this.seedCost;
+    if (this.economy.buySeed(cost)) {
+      publishNotice(`Semente comprada por ${cost}.`, 'good');
     } else {
-      publishNotice('Moedas insuficientes para comprar semente.', 'bad');
+      publishNotice(`Moedas insuficientes. A semente custa ${cost}.`, 'bad');
     }
     this.saveGame();
     this.emitState();
   }
 
   private sellWheat(): void {
-    const sale = this.economy.sellAllWheat();
-    if (sale.quantity > 0) {
-      publishNotice(`Vendeu ${sale.quantity} de trigo por ${sale.totalEarned}.`, 'good');
-    } else {
+    const quantity = this.economy.inventory.wheat;
+    if (quantity <= 0) {
       publishNotice('Não há trigo no estoque.', 'bad');
+      this.emitState();
+      return;
     }
+
+    const saturationBefore = this.market.saturationOf('wheat');
+    const result = this.market.sell('wheat', quantity);
+    this.economy.applySale(result.quantity, result.totalEarned, Math.round(result.averagePrice));
+
+    publishNotice(
+      `Vendeu ${result.quantity} de trigo por ${result.totalEarned} ` +
+        `(média ${result.averagePrice.toFixed(1)} por unidade).`,
+      'good',
+    );
+    if (result.priceAfter < result.priceBefore) {
+      publishNotice(`O preço do trigo caiu de ${result.priceBefore} para ${result.priceAfter}.`, 'bad');
+    }
+    this.pushLesson(
+      this.pedagogy.onSale(saturationBefore, result.quantity, result.priceBefore, result.priceAfter),
+    );
+
+    this.saveGame();
+    this.emitState();
+  }
+
+  private repayDebt(amount: number): void {
+    const paid = this.economy.repayDebt(amount);
+    if (paid > 0) publishNotice(`Abateu ${paid} da dívida.`, 'good');
+    else publishNotice('Sem moedas para abater a dívida.', 'bad');
     this.saveGame();
     this.emitState();
   }
@@ -456,6 +500,43 @@ export class IsoFarmScene extends Phaser.Scene {
     this.emitState();
   }
 
+  // ---------------------------------------------------------------- ciclo diario
+
+  private get seedCost(): number {
+    return Math.max(1, Math.round(this.inflation.nominal(SEED_BASE_COST)));
+  }
+
+  private pushLesson(lesson: Lesson | null): void {
+    if (!lesson) return;
+    this.lessons.push(lesson);
+    publishNotice(lesson.title, 'info');
+  }
+
+  private closeDay(): void {
+    this.inflation.advanceDay();
+    this.market.setPriceIndex(this.inflation.index);
+
+    const interest = this.economy.accrueInterest();
+    const householdCost = Math.max(1, Math.round(this.inflation.nominal(HOUSEHOLD_BASE_COST)));
+    const payment = this.economy.payDailyCost(householdCost);
+    if (payment.addedDebt > 0) {
+      publishNotice(`Faltou dinheiro. A dívida subiu ${payment.addedDebt}.`, 'bad');
+    }
+
+    this.market.advanceDay(this.clock.day);
+
+    this.pushLesson(
+      this.pedagogy.onInterest(this.economy.economy.debt, interest, this.economy.economy.interestPaidTotal),
+    );
+    this.pushLesson(this.pedagogy.onInflation(this.inflation.accumulatedPercent));
+    this.pushLesson(
+      this.pedagogy.onDayClose(this.economy.economy.todayRevenue, this.economy.economy.todayExpenses),
+    );
+
+    this.economy.rollOverDay();
+    this.saveGame();
+  }
+
   // ---------------------------------------------------------------- campos
 
   private groundForFieldState(state: FieldState): GroundKey {
@@ -512,8 +593,11 @@ export class IsoFarmScene extends Phaser.Scene {
       },
       selectedTile: this.selectedTile,
       lastSale: this.economy.lastSale,
-      wheatSeedCost: WHEAT_SEED_COST,
-      wheatPrice: WHEAT_PRICE,
+      wheatSeedCost: this.seedCost,
+      wheatPrice: this.market.priceOf('wheat'),
+      market: this.market.snapshot(),
+      inflation: this.inflation.snapshot,
+      lessons: [...this.lessons],
     };
     publishState(snapshot);
   }
@@ -527,6 +611,11 @@ export class IsoFarmScene extends Phaser.Scene {
       this.fields.load(save.fields);
       this.tasks.load(save.tasks);
       this.clock.load(save.clock);
+      this.inflation.load(save.inflation);
+      this.market.load(save.market);
+      this.pedagogy.load(save.pedagogy);
+      this.lessons = Array.isArray(save.lessons) ? save.lessons : [];
+      this.market.setPriceIndex(this.inflation.index);
       this.workerTileX = save.workerTileX ?? this.workerTileX;
       this.workerTileY = save.workerTileY ?? this.workerTileY;
     } catch {
@@ -543,6 +632,10 @@ export class IsoFarmScene extends Phaser.Scene {
           fields: this.fields.serialize(),
           tasks: this.tasks.serialize(),
           clock: this.clock.snapshot,
+          inflation: this.inflation.serialize(),
+          market: this.market.serialize(),
+          pedagogy: this.pedagogy.serialize(),
+          lessons: this.lessons,
           workerTileX: this.workerTileX,
           workerTileY: this.workerTileY,
         }),

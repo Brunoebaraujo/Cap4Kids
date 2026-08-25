@@ -160,7 +160,7 @@ def crop_stage(name: str, stage: int) -> None:
     draw = ImageDraw.Draw(img)
     base_y = 48
     heights = [6, 14, 24, 34]
-    colors = [(120, 168, 78), (110, 160, 70), (168, 176, 62), (206, 176, 62)]
+    colors = [(146, 200, 100), (138, 196, 92), (196, 206, 86), (236, 204, 86)]
     h = heights[stage]
     color = colors[stage]
     for _ in range(26):
@@ -199,10 +199,10 @@ def prop_tree() -> None:
     img = Image.new("RGBA", (TILE_W, TILE_H + 96), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     cx, feet = TILE_W / 2, TILE_H + 96 - TILE_H / 2
-    draw.rectangle([cx - 7, feet - 44, cx + 7, feet], fill=(104, 72, 44, 255),
-                   outline=(64, 44, 26, 255), width=2)
+    draw.rectangle([cx - 7, feet - 44, cx + 7, feet], fill=(146, 106, 68, 255),
+                   outline=(102, 72, 44, 255), width=2)
     for i, (r, dy, col) in enumerate(
-        [(40, 44, (58, 108, 52)), (32, 66, (72, 128, 60)), (22, 84, (92, 148, 70))]
+        [(40, 44, (86, 152, 76)), (32, 66, (104, 174, 88)), (22, 84, (126, 196, 104))]
     ):
         draw.ellipse([cx - r, feet - dy - r * 0.72, cx + r, feet - dy + r * 0.72],
                      fill=col + (255,), outline=shade(col, 0.6) + (255,), width=2)
@@ -218,7 +218,7 @@ def prop_fence(name: str, direction: str) -> None:
         a, b = (0, top + TILE_H / 2), (TILE_W / 2, top)
     else:
         a, b = (TILE_W / 2, top), (TILE_W, top + TILE_H / 2)
-    wood, dark = (156, 116, 70), (98, 70, 40)
+    wood, dark = (196, 156, 106), (142, 106, 70)
     draw.line([(a[0], a[1] - 6), (b[0], b[1] - 6)], fill=wood + (255,), width=4)
     draw.line([(a[0], a[1] - 22), (b[0], b[1] - 22)], fill=wood + (255,), width=4)
     for t in (0.0, 0.5, 1.0):
@@ -256,36 +256,36 @@ def main() -> None:
     os.makedirs(GROUND_DIR, exist_ok=True)
     os.makedirs(SPRITE_DIR, exist_ok=True)
 
-    ground_tile("grass_00", (96, 148, 72),
-                speckles=[(112, 168, 84), (82, 132, 62)], density=0.020)
-    ground_tile("grass_01", (90, 142, 68),
-                speckles=[(118, 172, 88), (76, 126, 58)], density=0.028)
-    ground_tile("grass_02", (102, 154, 76),
-                speckles=[(126, 180, 92), (86, 136, 66), (196, 196, 108)], density=0.024)
-    ground_tile("grass_03", (86, 136, 66),
-                speckles=[(108, 162, 80), (72, 120, 54)], density=0.016)
-    ground_tile("dirt", (150, 118, 78),
-                speckles=[(172, 140, 96), (124, 96, 60)], density=0.026)
-    ground_tile("path", (168, 142, 100),
-                speckles=[(190, 166, 124), (140, 116, 80)], density=0.030)
-    ground_tile("soil_plowed", (122, 88, 58), furrows="iso",
-                speckles=[(142, 106, 70)], density=0.012)
-    ground_tile("soil_planted", (112, 82, 54), furrows="iso",
-                speckles=[(120, 160, 74)], density=0.020)
-    ground_tile("water", (72, 122, 158),
-                speckles=[(96, 148, 184), (58, 104, 138)], density=0.030)
+    ground_tile("grass_00", (128, 194, 100),
+                speckles=[(150, 214, 118), (112, 178, 88)], density=0.018)
+    ground_tile("grass_01", (134, 200, 106),
+                speckles=[(156, 220, 124), (118, 184, 94)], density=0.024)
+    ground_tile("grass_02", (140, 206, 112),
+                speckles=[(162, 226, 130), (124, 190, 100), (222, 222, 140)], density=0.020)
+    ground_tile("grass_03", (122, 188, 94),
+                speckles=[(146, 210, 114), (108, 172, 84)], density=0.014)
+    ground_tile("dirt", (188, 154, 110),
+                speckles=[(208, 176, 132), (164, 130, 90)], density=0.022)
+    ground_tile("path", (212, 186, 142),
+                speckles=[(230, 208, 168), (188, 160, 118)], density=0.026)
+    ground_tile("soil_plowed", (162, 122, 84), furrows="iso",
+                speckles=[(182, 142, 100)], density=0.010)
+    ground_tile("soil_planted", (152, 114, 78), furrows="iso",
+                speckles=[(146, 194, 96)], density=0.018)
+    ground_tile("water", (108, 178, 214),
+                speckles=[(136, 202, 234), (92, 158, 194)], density=0.026)
 
-    building("farmhouse", 2, 58, (196, 176, 140), roof=(168, 84, 62), roof_h=34)
-    building("barn", 2, 62, (170, 74, 60), roof=(96, 72, 56), roof_h=30)
-    building("silo", 1, 96, (206, 200, 186), roof=(140, 146, 152), roof_h=18)
-    building("shipping_bin", 1, 34, (146, 112, 72))
-    building("well", 1, 30, (140, 138, 132), roof=(120, 88, 60), roof_h=22)
+    building("farmhouse", 2, 58, (238, 220, 184), roof=(224, 126, 98), roof_h=34)
+    building("barn", 2, 62, (214, 110, 92), roof=(150, 114, 86), roof_h=30)
+    building("silo", 1, 96, (236, 232, 218), roof=(182, 188, 196), roof_h=18)
+    building("shipping_bin", 1, 34, (192, 152, 104))
+    building("well", 1, 30, (188, 186, 178), roof=(170, 128, 90), roof_h=22)
 
     for i in range(4):
         crop_stage(f"wheat_{i}", i)
 
-    unit("worker_maya", (74, 118, 168), (232, 196, 160), 40)
-    unit("cow", (238, 236, 228), (74, 66, 58), 30)
+    unit("worker_maya", (92, 142, 200), (248, 214, 178), 40)
+    unit("cow", (250, 248, 242), (96, 86, 76), 30)
 
     prop_tree()
     prop_fence("fence_ne", "ne")
